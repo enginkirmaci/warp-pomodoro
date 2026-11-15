@@ -436,31 +436,20 @@ impl MainWindow {
                             .whitespace_nowrap()
                             .child("Warp Pomodoro"),
                     )
-                    // the family: the sibling windows this one can open
+                    // the family: the workbench window is the one sibling this
+                    // app has a reason to open (its rail shows the live timer)
                     .child(
-                        shell::app_links()
-                            .child(
-                                shell::app_link(
-                                    "pomodoro-launch-station",
-                                    "icons/logo-station.svg",
-                                    "Open Warp Station",
-                                )
-                                .on_click(|_, _, _| launch_sibling("warp-station"))
-                                .when(SHOW_TOOLTIPS, |d| {
-                                    d.tooltip(crate::ui::tooltip_text("Open Warp Station"))
-                                }),
+                        shell::app_links().child(
+                            shell::app_link(
+                                "pomodoro-launch-station",
+                                "icons/logo-station.svg",
+                                "Open Warp Station",
                             )
-                            .child(
-                                shell::app_link(
-                                    "pomodoro-launch-notes",
-                                    "icons/logo-notes.svg",
-                                    "Open Warp Notes",
-                                )
-                                .on_click(|_, _, _| launch_sibling("warp-notes"))
-                                .when(SHOW_TOOLTIPS, |d| {
-                                    d.tooltip(crate::ui::tooltip_text("Open Warp Notes"))
-                                }),
-                            ),
+                            .on_click(|_, _, _| launch_sibling("warp-station"))
+                            .when(SHOW_TOOLTIPS, |d| {
+                                d.tooltip(crate::ui::tooltip_text("Open Warp Station"))
+                            }),
+                        ),
                     ),
             )
             .child(div().flex_1())
