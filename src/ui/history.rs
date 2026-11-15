@@ -19,7 +19,7 @@ impl MainWindow {
         let today_work = sessions
             .iter()
             .filter(|session| session.kind.is_work())
-            .count();
+            .count() as u32;
         let week_work: u32 = week.iter().map(|day| day.work).sum();
         let busiest = week.iter().map(|day| day.work).max().unwrap_or(0).max(1);
 
@@ -32,10 +32,7 @@ impl MainWindow {
             .flex()
             .flex_col()
             .gap_3();
-        body = body.child(section_head(
-            "Today",
-            format!("{today_work} focus session(s)"),
-        ));
+        body = body.child(section_head("Today", focus_sessions(today_work)));
         if sessions.is_empty() {
             body = body.child(empty_line("No sessions yet today."));
         } else {
@@ -43,10 +40,11 @@ impl MainWindow {
                 body = body.child(session_row(session));
             }
         }
-        body = body.child(div().mt_4().child(section_head(
-            "Last 7 days",
-            format!("{week_work} focus session(s)"),
-        )));
+        body = body.child(
+            div()
+                .mt_4()
+                .child(section_head("Last 7 days", focus_sessions(week_work))),
+        );
         for (index, day) in week.iter().enumerate() {
             body = body.child(day_row(index, day, busiest, today));
         }
@@ -56,6 +54,16 @@ impl MainWindow {
             .child(self.page_head("History", "Today and the last seven days"))
             .child(body)
             .into_any_element()
+    }
+}
+
+/// `1 focus session` / `3 focus sessions`: the head's count line reads as
+/// prose, not as a template.
+fn focus_sessions(count: u32) -> String {
+    if count == 1 {
+        "1 focus session".to_string()
+    } else {
+        format!("{count} focus sessions")
     }
 }
 
