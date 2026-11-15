@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Warp Pomodoro">
+  <rect width="128" height="128" rx="30" fill="#252321"/>
+  <circle cx="64" cy="70" r="36" fill="none" stroke="#EE9A5F" stroke-width="8"/>
+  <path d="M64 70V48" fill="none" stroke="#F6F2EB" stroke-width="8" stroke-linecap="round"/>
+  <path d="M64 70h16" fill="none" stroke="#F6F2EB" stroke-width="8" stroke-linecap="round"/>
+  <path d="M46 22h36" fill="none" stroke="#EE9A5F" stroke-width="8" stroke-linecap="round"/>
+  <path d="M64 22v8" fill="none" stroke="#EE9A5F" stroke-width="8" stroke-linecap="round"/>
+</svg>

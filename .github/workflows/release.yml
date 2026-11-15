@@ -1,0 +1,143 @@
+name: release
+
+# Tag the commit whose version.toml says v<version>. The two platform jobs
+# build the app from this repository alone; the release job combines their
+# assets. The suite assembler expects the tarball's single top directory and
+# the portable zip's root-level exe exactly as below.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install GPUI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config jq \
+            libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev \
+            libvulkan-dev libfontconfig1-dev
+
+      - name: Check the tag against version.toml
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          actual=$(python3 scripts/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          test "$tag" = "$actual" || {
+            echo "::error::version.toml says $actual, the tag says $tag"
+            exit 1
+          }
+
+      - name: Read the pinned channel
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+        id: toolchain
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo build --release
+        run: cargo build --release --locked
+
+      - name: Stage the Linux bundle
+        run: |
+          version=$(python3 scripts/version.py show --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          stage="dist/warp-pomodoro-$version-linux"
+          mkdir -p "$stage/bin" "$stage/applications" "$stage/icons/hicolor"
+          cp target/release/warp-pomodoro "$stage/bin/"
+          for f in packaging/linux/icons/warppomodoro-*.png; do
+            size=$(basename "$f" | sed -E 's/.*-([0-9]+)\.png/\1/')
+            install -Dm644 "$f" "$stage/icons/hicolor/${size}x${size}/apps/warppomodoro.png"
+          done
+          install -Dm644 packaging/linux/icons/warppomodoro.svg "$stage/icons/hicolor/scalable/apps/warppomodoro.svg"
+          cp packaging/linux/warp-pomodoro.desktop "$stage/applications/"
+          tar -czf "dist/warp-pomodoro-$version-linux.tar.gz" -C dist "warp-pomodoro-$version-linux"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-linux
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check the tag against version.toml
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          actual=$(python scripts/version.py show --json | python -c 'import json,sys; print(json.load(sys.stdin)["version"])')
+          test "$tag" = "$actual" || {
+            echo "::error::version.toml says $actual, the tag says $tag"
+            exit 1
+          }
+
+      - name: Read the pinned channel
+        shell: bash
+        run: echo "channel=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+        id: toolchain
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo build --release
+        run: cargo build --release --locked
+
+      - name: Stage and zip the portable Windows build
+        run: |
+          $version = (python scripts/version.py show --json | ConvertFrom-Json).version
+          $stage = Join-Path $PWD "dist/warp-pomodoro-$version-windows-x64"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item target/release/warp-pomodoro.exe $stage
+          Compress-Archive -Path "$stage/*" -DestinationPath "$stage.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: dist/*.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  release:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Write checksums
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: warp-pomodoro ${{ github.ref_name }}
+          body: |
+            Linux bundle (binary, desktop entry, hicolor icons) and the Windows
+            portable zip.
+          files: |
+            artifacts/*

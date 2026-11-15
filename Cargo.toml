@@ -1,0 +1,56 @@
+[package]
+name = "warp-pomodoro"
+version = "0.1.1"
+edition = "2024"
+description = "WarpPomodoro — a focus timer with a live Warp Station rail page"
+license = "GPL-3.0"
+repository = "https://github.com/enginkirmaci/warp-pomodoro"
+publish = false
+
+# src/lib.rs is the probe boundary (tests/ build the real views); the binary is
+# a thin bootstrap over it. Both targets come from cargo's defaults.
+
+[dependencies]
+# kit line: pinned by tag, patched to kits/ by warp-suite's local build
+warpui-kit-core = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.1.40", package = "warpui-kit-core" }
+warpui-kit-platform = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.1.40", package = "warpui-kit-platform" }
+
+# the gpui stack, pinned here because the app builds standalone
+gpui = { package = "gpui-pre", version = "=0.3.11" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.11", features = ["wayland", "x11"] }
+gpui-kit = "0.9"
+
+# third-party
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# debug-embed: embed assets at compile time in debug builds too — without it
+# rust-embed resolves "assets" against the process CWD at runtime, so the app
+# only finds its icons when launched from the repo root
+rust-embed = { version = "8", features = ["debug-embed"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[dev-dependencies]
+# headless UI probes (tests/); feature-unifies with the normal gpui-kit dep
+# only under `cargo test`
+gpui-kit = { version = "0.9", features = ["test-support"] }
+
+[build-dependencies]
+warpui-kit-build = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.1.40", package = "warpui-kit-build" }
+
+# WinRT toasts on Windows (Action Center): the crate wraps Windows.UI.Notifications
+# and falls back to PowerShell's whitelisted AppUserModelID, so toasts appear
+# without a Start-menu registration. Linux uses the notify-send spawner in the
+# same module, so the dependency stays behind cfg(windows).
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.7"
+
+# Release profile, shared with the suite (warp-suite's root manifest carries the
+# same three keys): thin LTO, one codegen unit and no symbol table.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

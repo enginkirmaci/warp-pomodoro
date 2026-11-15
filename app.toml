@@ -1,0 +1,12 @@
+# Build and packaging facts read by the app's own build and release tooling.
+[app]
+package = "warp-pomodoro"
+icon_prefix = "warppomodoro"
+scalable_svg = "packaging/linux/icons/warppomodoro.svg"
+notes = """
+Pomodoro focus timer. Owns ~/.warp/pomodoro (settings.json, history.json and
+the live state.json snapshot) and the token-authenticated door Warp Station's
+Pomodoro section polls: ping, status, start, pause, reset, skip and focus.
+--start starts a work session as soon as the window opens. Durations, the
+long-break cycle, auto-start and notifications live here, never in Station.
+"""

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Warp Pomodoro
+Comment=Focus timer for the Warp suite
+Exec=__WARP_SUITE_BIN__/warp-pomodoro
+Icon=warppomodoro
+Terminal=false
+Categories=Utility;
+StartupWMClass=warp-pomodoro
