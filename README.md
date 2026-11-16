@@ -13,10 +13,21 @@ the [warp](https://github.com/enginkirmaci/warp-suite) family. Rust/GPUI
   reaches zero; a skip moves on without counting it.
 - The window is the family shell, compact: the custom titlebar, the rail
   (Timer, History, About and Settings at the bottom) and one detail pane. The
-  timer page is a large mono countdown, the phase, the cycle dots, today's and
-  the week's completed focus sessions, a Start/Pause primary and Reset/Skip
-  secondaries. History shows today's sessions and the seven-day summary as one
-  bar row per day.
+  timer page is a **countdown ring** that drains with the phase, the large mono
+  countdown, the phase, the cycle dots, today's and the week's completed focus
+  sessions, a Start/Pause primary and Reset/Skip secondaries. A phase end
+  plays a short chime and a 600 ms ring bloom; the ring only asks for frames
+  while it moves, and reduced motion keeps it static.
+- **The mini card** is the same timer in a small always-on-top window: the
+  ring, the countdown, the phase and cycle, and four controls — start/pause,
+  expand, pin and close. The whole card drags the window and a double click
+  expands it. The app opens in the mode the last session left (the first run
+  opens the full window); each mode remembers its own size and position.
+  Always-on-top is real on Windows (`SetWindowPos`); on Linux it is best
+  effort through the compositor (Hyprland floats and pins the card), and the
+  Settings page says so when the compositor cannot.
+- History shows today's sessions and the seven-day summary as one bar row per
+  day.
 - Completed sessions are logged to `~/.warp/pomodoro/history.json` (newest
   last, capped at the last 500 completed work sessions). Breaks are logged
   beside them; nothing is recorded for a skipped work session.
@@ -40,6 +51,8 @@ warp-pomodoro [--start] [--version|-V]
   1 · abc1234) · dev`) and exits.
 - Unknown args are ignored so a stale desktop shortcut never blocks the
   window.
+- The window opens in the mode saved in the settings; `WARP_POMODORO_MODE=full`
+  or `=mini` overrides it for one launch (the capture hook).
 
 A second launch with a live instance forwards `focus` and exits before any
 logging or migration runs. Closing the window writes one final paused
@@ -51,9 +64,10 @@ Everything lives under `~/.warp/pomodoro/`:
 
 | File | What |
 | --- | --- |
-| `settings.json` | durations, long-break cycle, auto-start, notifications |
+| `settings.json` | durations, cycle, auto-start, notifications, sound, window mode and boxes |
 | `history.json` | completed sessions, newest last |
 | `state.json` | the live snapshot Warp Station reads when the door is down |
+| `chime.wav` | the bundled alert chime, written out of the binary on first use |
 | `ipc.port` + `ipc.token` | the door, present only while the app runs |
 
 All three JSON documents are versioned snake_case with a top-level
@@ -73,6 +87,16 @@ Commands: `ping` (answered by the door thread), `status`, `start`, `pause`,
 `reset`, `skip` and `focus`. `ping` reports `protocol: 1`, `app:
 "warp-pomodoro"`, the version and the pid. Unknown commands answer
 `{"ok": false, "error": "unknown command: <cmd>"}`.
+
+## Sound
+
+A phase end plays a short bundled chime (`assets/audio/chime.wav`, written to
+`~/.warp/pomodoro/chime.wav` the first time). Linux hands it to the first of
+`pw-play`, `paplay`, `aplay` that exists; Windows uses `PlaySoundW`; macOS
+`afplay`. The Settings page has the switch, a custom-file field (a WAV or OGG
+outside the app folder wins over the bundled chime) and a **Test** button. A
+machine without a player gets one log line; the timer never blocks on the
+bell.
 
 ## Build
 

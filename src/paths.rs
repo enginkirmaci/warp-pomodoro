@@ -29,6 +29,12 @@ impl AppPaths {
     pub fn state_file() -> PathBuf {
         Self::config_dir().join("state.json")
     }
+
+    /// The bundled alert chime, written out of the binary on first use so a
+    /// system player has a file to open.
+    pub fn chime_file() -> PathBuf {
+        Self::config_dir().join("chime.wav")
+    }
 }
 
 #[cfg(test)]
@@ -50,6 +56,10 @@ mod tests {
         assert_eq!(
             AppPaths::state_file(),
             AppPaths::config_dir().join("state.json")
+        );
+        assert_eq!(
+            AppPaths::chime_file(),
+            AppPaths::config_dir().join("chime.wav")
         );
     }
 }

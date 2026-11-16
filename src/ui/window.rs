@@ -1,16 +1,18 @@
 //! The Pomodoro window: the family's custom titlebar over the rail and one
-//! detail pane. A timer is a glance rather than a workspace, so the window
-//! stays compact and there is no list pane: the rail picks the page and the
-//! detail pane draws it. The 250 ms tick is the whole runtime — it runs the
-//! countdown, drains the door, persists the snapshot and fires the phase-end
-//! notifications.
+//! detail pane, or the mini card when the window is collapsed. A timer is a
+//! glance rather than a workspace, so the window stays compact and there is no
+//! list pane: the rail picks the page and the detail pane draws it. The 250 ms
+//! tick is the runtime — it runs the countdown, drains the door, persists the
+//! snapshot and fires the phase-end notifications and chime. The ring asks for
+//! animation frames only while the countdown moves or a bloom plays.
 
 use chrono::Local;
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, FocusHandle, FontWeight, MouseButton, SharedString, Window,
+    AnyElement, Context, Entity, FocusHandle, FontWeight, MouseButton, SharedString, Window,
     WindowControlArea, div, px,
 };
+use gpui_kit::component::input::{InputEvent, InputState};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use warpui_kit_core::about;
@@ -18,17 +20,28 @@ use warpui_kit_core::shell;
 
 use crate::history::History;
 use crate::ipc::{self, CommandKind, DoorCommand};
-use crate::settings::Settings;
+use crate::settings::{Settings, WindowBox, WindowMode};
 use crate::state::{self, Writer};
 use crate::theme;
 use crate::timer::{Timer, Transition};
+use crate::ui::ring::RingState;
 use crate::ui::{icon, window_button, window_button_glyph};
 
 /// The countdown's tick: four times a second keeps a displayed second within a
 /// quarter second of the clock without a per-frame wall-clock read.
 const TICK: Duration = Duration::from_millis(250);
 
-const SHOW_TOOLTIPS: bool = true;
+pub(crate) const SHOW_TOOLTIPS: bool = true;
+
+/// The mode this launch opens in: the `WARP_POMODORO_MODE=full|mini` capture
+/// hook when set, else the mode the last session left in the settings.
+pub fn launch_mode() -> WindowMode {
+    match std::env::var("WARP_POMODORO_MODE").ok().as_deref() {
+        Some("mini") => WindowMode::Mini,
+        Some("full") => WindowMode::Full,
+        _ => Settings::load().window_mode,
+    }
+}
 
 /// The launch contract: `warp-pomodoro [--start] [--version|-V]`.
 #[derive(Clone, Copy, Debug, Default)]
@@ -92,6 +105,12 @@ pub struct MainWindow {
     pub(crate) timer: Timer,
     pub(crate) section: Section,
     pub(crate) about_selected: about::AppId,
+    /// The window's layout: the full dashboard or the mini card.
+    pub(crate) mode: WindowMode,
+    /// The alert-sound path field, shown on the Settings page.
+    pub(crate) sound_path: Entity<InputState>,
+    /// The Test button's last failure, cleared by a successful play.
+    pub(crate) sound_test: Option<String>,
     writer: Writer,
     /// The door this window publishes; dropping it removes the endpoint files.
     door: Option<ipc::Door>,
@@ -106,6 +125,15 @@ pub struct MainWindow {
     /// A left press landed on the titlebar background; the first move turns it
     /// into a window drag (Linux/macOS — Windows uses the HTCAPTION path).
     titlebar_should_move: bool,
+    /// When the last phase end started its ring bloom.
+    bloom: Option<Instant>,
+    /// Whether the platform accepted the always-on-top intent; `None` until
+    /// the first application, `Some(false)` when the compositor has no such
+    /// control (the Settings page shows the hint then).
+    pub(crate) topmost_taken: Option<bool>,
+    /// The startup intent still has to be applied once the window is mapped
+    /// (the compositor may not list it yet at construction).
+    pending_topmost: bool,
 }
 
 impl MainWindow {
@@ -116,6 +144,15 @@ impl MainWindow {
         if launch.start {
             timer.start();
         }
+        // the mode the window was opened in (the launcher read the same hook);
+        // a saved mini opens the card, and the card always floats
+        let mode = launch_mode();
+        let sound_path = cx.new(|cx| {
+            let mut state =
+                InputState::new(window, cx).placeholder("Empty plays the bundled chime");
+            state.set_value(settings.sound_path.clone(), window, cx);
+            state
+        });
         // E2E hook: WARP_POMODORO_PAGE=timer|history|about|settings opens that
         // rail section on launch (a hidden window takes no pointer, so a
         // capture needs the page to open itself). Read once, here.
@@ -138,6 +175,9 @@ impl MainWindow {
             timer,
             section,
             about_selected: about::AppId::Pomodoro,
+            mode,
+            sound_path: sound_path.clone(),
+            sound_test: None,
             writer: Writer::new(),
             door,
             commands,
@@ -146,7 +186,20 @@ impl MainWindow {
             fractional: Duration::ZERO,
             quitting: false,
             titlebar_should_move: false,
+            bloom: None,
+            topmost_taken: None,
+            pending_topmost: mode == WindowMode::Mini,
         };
+        // typing in the sound path applies at once, like every other setting
+        cx.subscribe(&sound_path, |this, field, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.settings.sound_path = field.read(cx).value().to_string();
+                this.settings.save();
+                this.sound_test = None;
+                cx.notify();
+            }
+        })
+        .detach();
         // the live snapshot lands with the first frame
         this.writer.write_now(&snapshot);
         // a clean quit leaves a paused snapshot and removes the endpoint
@@ -218,6 +271,152 @@ impl MainWindow {
         self.commit(cx);
     }
 
+    /// Switches between the full dashboard and the mini card: save where the
+    /// old layout sat, resize, and let the compositor know the new intent (the
+    /// card floats; the pin follows the setting).
+    pub(crate) fn set_mode(
+        &mut self,
+        mode: WindowMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mode == mode {
+            return;
+        }
+        self.track_bounds(window);
+        self.mode = mode;
+        self.settings.window_mode = mode;
+        self.settings.save();
+        // Linux: a tiled window ignores its own size, so float it before the
+        // resize; Windows carries the topmost flag at the same time
+        // the card floats and takes its own box; leaving it returns the window
+        // to the layout, where the compositor owns the size (a tiling desktop
+        // re-tiles it) — Windows restores the saved full-window box instead
+        self.apply_topmost(window);
+        #[cfg(target_os = "linux")]
+        let restore_box = mode == WindowMode::Mini;
+        #[cfg(not(target_os = "linux"))]
+        let restore_box = true;
+        if restore_box {
+            let (width, height) = self.mode_size(mode);
+            window.resize(gpui::size(px(width), px(height)));
+            // Wayland treats the client's size request as a hint; where the
+            // compositor has its own IPC (Hyprland), the box is asked for
+            // directly so the window and the card cannot disagree
+            crate::topmost::resize(window, width, height);
+        }
+        cx.notify();
+    }
+
+    /// `M` and the titlebar's collapse button: the other mode.
+    pub(crate) fn toggle_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let next = match self.mode {
+            WindowMode::Full => WindowMode::Mini,
+            WindowMode::Mini => WindowMode::Full,
+        };
+        self.set_mode(next, window, cx);
+    }
+
+    /// The pin in the mini card and the Settings switch: the intent is stored
+    /// even where the compositor cannot honor it.
+    pub(crate) fn toggle_topmost(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings.always_on_top = !self.settings.always_on_top;
+        self.settings.save();
+        self.apply_topmost(window);
+        cx.notify();
+    }
+
+    /// The Settings switch wrote the setting; hand the intent to the platform
+    /// and repaint the page's hint. Only the card has an intent: in the full
+    /// window the layout owns the size and the stacking, so a toggle there
+    /// just waits for the next collapse.
+    pub(crate) fn reapply_topmost(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.mode == WindowMode::Mini {
+            self.apply_topmost(window);
+        } else {
+            self.topmost_taken = Some(true);
+        }
+        cx.notify();
+    }
+
+    /// Hands the intent to the platform; the card floats in mini mode on
+    /// Linux whether or not the pin is on.
+    fn apply_topmost(&mut self, window: &Window) {
+        let mini = self.mode == WindowMode::Mini;
+        let pin = mini && self.settings.always_on_top;
+        let taken = crate::topmost::apply(window, mini, pin);
+        self.topmost_taken = Some(!pin || taken);
+    }
+
+    /// The saved size for a mode, or its design size when the session has
+    /// never used it.
+    fn mode_size(&self, mode: WindowMode) -> (f32, f32) {
+        let saved = match mode {
+            WindowMode::Full => self.settings.bounds_full,
+            WindowMode::Mini => self.settings.bounds_mini,
+        };
+        match saved {
+            Some(boxed) => (boxed.w as f32, boxed.h as f32),
+            None => match mode {
+                WindowMode::Full => (theme::scaled(theme::FULL_W), theme::scaled(theme::FULL_H)),
+                WindowMode::Mini => (theme::scaled(theme::MINI_W), theme::scaled(theme::MINI_H)),
+            },
+        }
+    }
+
+    /// Remembers where the current mode sits, so the next launch reopens it
+    /// there. The tick calls this every quarter second; a drag or a resize is
+    /// therefore never lost, with no bounds-change hook to miss.
+    fn track_bounds(&mut self, window: &Window) {
+        if self.pending_topmost {
+            // the window still has the compositor's first size; the claim
+            // below is what gives the card its box
+            return;
+        }
+        let bounds = window.bounds();
+        let boxed = WindowBox {
+            x: bounds.origin.x.to_i32(),
+            y: bounds.origin.y.to_i32(),
+            w: bounds.size.width.to_i32(),
+            h: bounds.size.height.to_i32(),
+        }
+        .sane();
+        match self.mode {
+            WindowMode::Full => self.settings.bounds_full = boxed,
+            WindowMode::Mini => self.settings.bounds_mini = boxed.and_then(WindowBox::sane_card),
+        }
+    }
+
+    /// The ring's one frame: the share of the phase left (sub-second, so the
+    /// arc keeps moving between ticks) and the bloom after a phase end.
+    pub(crate) fn ring_state(&self, now: Instant) -> RingState {
+        let total = self.timer.phase_seconds() as f32;
+        let remaining = if self.timer.running() {
+            let between = now.saturating_duration_since(self.last_tick).as_secs_f32();
+            (self.timer.remaining_seconds() as f32 - between).max(0.)
+        } else {
+            self.timer.remaining_seconds() as f32
+        };
+        let bloom = self.bloom.and_then(|started| {
+            let t = now.saturating_duration_since(started).as_secs_f32()
+                / (theme::BLOOM_MS as f32 / 1000.);
+            (t < 1.).then_some(t)
+        });
+        RingState {
+            progress: crate::ui::ring::progress(remaining, total),
+            bloom,
+        }
+    }
+
+    /// Whether the window needs a new frame right now: the clock moves or the
+    /// bloom plays. A paused timer with no bloom requests nothing.
+    fn animating(&self, now: Instant) -> bool {
+        self.timer.running()
+            || self.bloom.is_some_and(|started| {
+                now.saturating_duration_since(started) < Duration::from_millis(theme::BLOOM_MS)
+            })
+    }
+
     fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.quitting {
             return;
@@ -248,6 +447,22 @@ impl MainWindow {
             }
         } else {
             self.fractional = Duration::ZERO;
+        }
+
+        // a drag or resize is remembered continuously; the close saves the file
+        self.track_bounds(window);
+        // the startup intent waits for the window to be mapped, so the
+        // compositor lists it when the card asks to float and stay on top
+        if self.pending_topmost && window.is_visible() {
+            self.pending_topmost = false;
+            self.apply_topmost(window);
+            // a saved mini opens the card, and the compositor's first frame
+            // may have given it the tiled or default size: claim the box
+            if self.mode == WindowMode::Mini {
+                let (width, height) = self.mode_size(self.mode);
+                window.resize(gpui::size(px(width), px(height)));
+                crate::topmost::resize(window, width, height);
+            }
         }
 
         let snapshot = self.timer.snapshot(&self.history.sessions, Local::now());
@@ -294,17 +509,24 @@ impl MainWindow {
             }
         }
         self.history.save();
+        // one bloom and one chime per tick, even when a suspended window
+        // walked several phases at once
+        self.bloom = Some(Instant::now());
+        if self.settings.sound_enabled {
+            crate::sound::play(&self.settings);
+        }
     }
 
-    /// The clean-exit half of the contract: a paused snapshot and no endpoint
-    /// files. Runs on app quit and on the titlebar's close button.
-    fn flush_exit(&mut self) {
+    /// The clean-exit half of the contract: a paused snapshot, the window box
+    /// and no endpoint files. Runs on app quit and on the close buttons.
+    pub(crate) fn flush_exit(&mut self) {
         if self.quitting {
             return;
         }
         self.quitting = true;
         let snapshot = state::exit_snapshot(&self.timer, &self.history);
         self.writer.write_now(&snapshot);
+        self.settings.save();
         self.door.take();
     }
 
@@ -435,21 +657,6 @@ impl MainWindow {
                             .text_color(theme::text())
                             .whitespace_nowrap()
                             .child("Warp Pomodoro"),
-                    )
-                    // the family: the workbench window is the one sibling this
-                    // app has a reason to open (its rail shows the live timer)
-                    .child(
-                        shell::app_links().child(
-                            shell::app_link(
-                                "pomodoro-launch-station",
-                                "icons/logo-station.svg",
-                                "Open Warp Station",
-                            )
-                            .on_click(|_, _, _| launch_sibling("warp-station"))
-                            .when(SHOW_TOOLTIPS, |d| {
-                                d.tooltip(crate::ui::tooltip_text("Open Warp Station"))
-                            }),
-                        ),
                     ),
             )
             .child(div().flex_1())
@@ -461,6 +668,26 @@ impl MainWindow {
                     .items_center()
                     .justify_end()
                     .gap_1()
+                    // the family link lives with the window controls, so the
+                    // brand cluster carries only this app's own mark
+                    .child(window_button(
+                        "pomodoro-launch-station",
+                        "icons/logo-station.svg",
+                        theme::raised().into(),
+                        "Open Warp Station",
+                        SHOW_TOOLTIPS,
+                        |_, _, _| launch_sibling("warp-station"),
+                    ))
+                    .child(window_button(
+                        "pomodoro-collapse",
+                        "icons/icon-collapse.svg",
+                        theme::raised().into(),
+                        "Mini screen",
+                        SHOW_TOOLTIPS,
+                        cx.listener(|this, _, window, cx| {
+                            this.set_mode(WindowMode::Mini, window, cx)
+                        }),
+                    ))
                     .child(window_button(
                         "pomodoro-minimize",
                         "icons/icon-window-minimize.svg",
@@ -505,25 +732,65 @@ impl MainWindow {
     }
 }
 
+impl MainWindow {
+    /// The window's plain-key shortcuts: `Space` on any screen, and the mini
+    /// card's own set. The key handler sits on the window root, so an input
+    /// that owns the keys keeps them (typing a space in Settings stays typing).
+    fn handle_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.control || modifiers.alt || modifiers.platform {
+            return;
+        }
+        match event.keystroke.key.as_str() {
+            "space" => {
+                self.toggle_timer(cx);
+                cx.stop_propagation();
+            }
+            "m" => {
+                self.toggle_mode(window, cx);
+                cx.stop_propagation();
+            }
+            "p" if self.mode == WindowMode::Mini => {
+                self.toggle_topmost(window, cx);
+                cx.stop_propagation();
+            }
+            "escape" if self.mode == WindowMode::Mini => {
+                self.set_mode(WindowMode::Full, window, cx);
+                cx.stop_propagation();
+            }
+            _ => {}
+        }
+    }
+}
+
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // the ring asks for the next frame only while it moves; a paused timer
+        // with no bloom leaves the window idle, and a hidden window never
+        // animates at all
+        if self.animating(Instant::now()) && window.is_visible() {
+            window.request_animation_frame();
+        }
         let page_focus = self.page_focus.clone();
-        div()
+        let root = div()
             .size_full()
             .flex()
             .flex_col()
             .min_h_0()
             .bg(theme::background())
             .track_focus(&page_focus)
-            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
-                let modifiers = event.keystroke.modifiers;
-                let plain = !modifiers.control && !modifiers.alt && !modifiers.platform;
-                if plain && event.keystroke.key == "space" {
-                    this.toggle_timer(cx);
-                    cx.stop_propagation();
-                }
-            }))
-            .child(self.render_titlebar(window, cx))
+            .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                this.handle_key(event, window, cx);
+            }));
+        if self.mode == WindowMode::Mini {
+            return root.child(self.render_mini(window, cx)).into_any_element();
+        }
+        root.child(self.render_titlebar(window, cx))
             .child(
                 div()
                     .id("pomodoro-body")
@@ -537,6 +804,7 @@ impl Render for MainWindow {
                     .child(self.render_rail(cx))
                     .child(self.render_body(window, cx)),
             )
+            .into_any_element()
     }
 }
 

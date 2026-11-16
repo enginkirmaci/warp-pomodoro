@@ -29,6 +29,29 @@ pub const CYCLE_DOT: f32 = 9.;
 pub const CYCLE_DOT_GAP: f32 = 7.;
 /// The widest the timer page's centred column goes.
 pub const TIMER_CONTENT_MAX_W: f32 = 320.;
+/// The countdown ring around the clock, and the arc's thickness.
+pub const RING_SIZE: f32 = 300.;
+pub const RING_THICKNESS: f32 = 10.;
+/// How long the phase-end bloom runs, in milliseconds.
+pub const BLOOM_MS: u64 = 600;
+
+// ---- the mini card ---------------------------------------------------------
+
+/// The card's design size; it is also the window's size while collapsed.
+pub const MINI_W: f32 = 360.;
+pub const MINI_H: f32 = 108.;
+/// The card's clock face, its ring and that ring's arc.
+pub const MINI_CLOCK: f32 = 30.;
+pub const MINI_RING: f32 = 52.;
+pub const MINI_RING_THICKNESS: f32 = 5.;
+/// One mini control's square.
+pub const MINI_BUTTON: f32 = 26.;
+
+// ---- the full window -------------------------------------------------------
+
+/// The full window's design size, used until a session saves its own box.
+pub const FULL_W: f32 = 760.;
+pub const FULL_H: f32 = 720.;
 
 // ---- the settings page ------------------------------------------------------
 

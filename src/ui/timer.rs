@@ -83,6 +83,11 @@ impl MainWindow {
             );
         }
 
+        let ring = self.ring_state(std::time::Instant::now());
+        let ink = gpui::Hsla::from(theme::accent());
+        let track = gpui::Hsla::from(theme::raised());
+        let ring_size = theme::scaled(theme::RING_SIZE);
+
         shell::detail_pane()
             .debug_selector(|| "timer-page".into())
             .child(self.page_head(
@@ -104,35 +109,58 @@ impl MainWindow {
                     .gap_5()
                     .p(px(shell::DETAIL_PADDING))
                     .child(
+                        // the ring is the page's clock face: the countdown,
+                        // the phase and the cycle sit inside it, and the arc
+                        // drains with the phase
                         div()
-                            .w_full()
-                            .max_w(px(theme::scaled(theme::TIMER_CONTENT_MAX_W)))
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap_2()
+                            .relative()
+                            .debug_selector(|| "timer-ring".into())
+                            .size(px(ring_size))
+                            .flex_shrink_0()
+                            .child(crate::ui::ring::ring(
+                                ring_size,
+                                theme::scaled(theme::RING_THICKNESS),
+                                ring,
+                                ink,
+                                track,
+                            ))
                             .child(
+                                // absolute without an inset sits at its
+                                // static position (after the canvas), so pin
+                                // it to the ring's own box
                                 div()
-                                    .debug_selector(|| "timer-phase".into())
-                                    .text_size(px(theme::font_sub()))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(theme::accent_ink())
-                                    .child(phase.label()),
-                            )
-                            .child(clock(remaining)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap_1()
-                            .child(dots)
-                            .child(
-                                div()
-                                    .text_size(px(theme::font_micro()))
-                                    .text_color(theme::text_muted())
-                                    .child(format!("Cycle {completed}/{every}")),
+                                    .absolute()
+                                    .top_0()
+                                    .left_0()
+                                    .size_full()
+                                    .flex()
+                                    .flex_col()
+                                    .items_center()
+                                    .justify_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .debug_selector(|| "timer-phase".into())
+                                            .text_size(px(theme::font_sub()))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(theme::accent_ink())
+                                            .child(phase.label()),
+                                    )
+                                    .child(clock(remaining))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .items_center()
+                                            .gap_1()
+                                            .child(dots)
+                                            .child(
+                                                div()
+                                                    .text_size(px(theme::font_micro()))
+                                                    .text_color(theme::text_muted())
+                                                    .child(format!("Cycle {completed}/{every}")),
+                                            ),
+                                    ),
                             ),
                     )
                     .child(
@@ -170,12 +198,14 @@ fn clock(seconds: u32) -> AnyElement {
         .line_height(gpui::relative(1.1))
         .font_weight(FontWeight::MEDIUM)
         .text_color(theme::text())
-        .child(SharedString::from(format!(
-            "{:02}:{:02}",
-            seconds / 60,
-            seconds % 60
-        )))
+        .child(SharedString::from(clock_text(seconds)))
         .into_any_element()
+}
+
+/// `mm:ss`, shared by the page's clock and the mini card. Durations run to a
+/// day, so the minutes field is not capped at two digits.
+pub(crate) fn clock_text(seconds: u32) -> String {
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
 /// A debug-selector slot around a shared control: `controls::button` takes no

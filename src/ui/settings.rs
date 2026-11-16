@@ -3,12 +3,15 @@
 //! controls. Everything applies at once — the design has no Save — and lands
 //! in `~/.warp/pomodoro/settings.json`.
 
+use gpui::Focusable as _;
 use gpui::prelude::*;
 use gpui::{AnyElement, App, ClickEvent, Context, SharedString, Window, div, px};
 use warpui_kit_core::settings as kit;
 use warpui_kit_core::shell;
 
-use crate::settings::{LONG_BREAK_EVERY_MAX, LONG_BREAK_EVERY_MIN, MINUTES_MAX, MINUTES_MIN};
+use crate::settings::{
+    LONG_BREAK_EVERY_MAX, LONG_BREAK_EVERY_MIN, MINUTES_MAX, MINUTES_MIN, WindowMode,
+};
 use crate::theme;
 use crate::ui::A11y;
 use crate::ui::window::MainWindow;
@@ -25,7 +28,7 @@ enum StepField {
 impl MainWindow {
     pub(crate) fn render_settings(
         &mut self,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = self.settings.clone();
@@ -108,6 +111,67 @@ impl MainWindow {
             }),
         ));
 
+        rows.push(kit::subhead("Sound"));
+        rows.push(kit::switch_row_with_desc(
+            "switch-alert-sound",
+            "Alert sound",
+            "settings-row-Alert sound",
+            "A short chime when a phase ends (independent of the notification)",
+            settings.sound_enabled,
+            true,
+            cx.listener(|this, on: &bool, _, cx| {
+                this.settings.sound_enabled = *on;
+                this.settings_changed(cx);
+            }),
+        ));
+        rows.push(kit::row_with_desc(
+            "settings-row-Sound file",
+            "Sound file",
+            "A WAV or OGG to play instead; empty plays the bundled chime",
+            self.sound_path_controls(window, cx),
+            false,
+        ));
+        if let Some(error) = &self.sound_test {
+            rows.push(sound_note(error.clone(), true));
+        }
+
+        rows.push(kit::subhead("Window"));
+        rows.push(kit::switch_row_with_desc(
+            "switch-always-on-top",
+            "Always on top",
+            "settings-row-Always on top",
+            "Keep the mini screen above the other windows where the platform allows it",
+            settings.always_on_top,
+            true,
+            cx.listener(|this, on: &bool, window, cx| {
+                this.settings.always_on_top = *on;
+                this.settings.save();
+                this.reapply_topmost(window, cx);
+            }),
+        ));
+        rows.push(kit::switch_row_with_desc(
+            "switch-start-mini",
+            "Start in the mini screen",
+            "settings-row-Start in the mini screen",
+            "Open the small always-on-top card next time the app starts",
+            settings.window_mode == WindowMode::Mini,
+            false,
+            cx.listener(|this, on: &bool, _, cx| {
+                this.settings.window_mode = if *on {
+                    WindowMode::Mini
+                } else {
+                    WindowMode::Full
+                };
+                this.settings_changed(cx);
+            }),
+        ));
+        if self.topmost_taken == Some(false) {
+            rows.push(sound_note(
+                "This compositor does not support always-on-top; the setting is saved.".to_string(),
+                false,
+            ));
+        }
+
         rows.push(kit::subhead("Appearance"));
         rows.push(kit::row_with_desc(
             "settings-row-Text size",
@@ -141,6 +205,43 @@ impl MainWindow {
                             .max_w(px(shell::READING_WIDTH))
                             .child(kit::rows(rows)),
                     ),
+            )
+            .into_any_element()
+    }
+
+    /// The sound file's field and its Test button, side by side.
+    fn sound_path_controls(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let field = warpui_kit_core::field::boxed(
+            "settings-sound-path",
+            &self.sound_path.read(cx).focus_handle(cx),
+            window,
+            warpui_kit_core::field::title_height(),
+        )
+        .child(warpui_kit_core::field::mono_input(&self.sound_path));
+        let test = warpui_kit_core::controls::button(
+            "settings-sound-test",
+            "Test",
+            warpui_kit_core::controls::BtnKind::Chip,
+            theme::accent(),
+            theme::font_control(),
+            true,
+            cx.listener(|this, _, _, cx| {
+                this.sound_test = crate::sound::play_now(&this.settings).err();
+                cx.notify();
+            }),
+        );
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .w(px(theme::scaled(360.)))
+            .child(field)
+            .child(
+                div()
+                    .debug_selector(|| "settings-sound-test-slot".into())
+                    .flex_shrink_0()
+                    .child(test),
             )
             .into_any_element()
     }
@@ -261,4 +362,27 @@ fn step_button(
 fn step_u32(value: u32, delta: i32, min: u32, max: u32) -> u32 {
     let next = i64::from(value) + i64::from(delta);
     next.clamp(i64::from(min), i64::from(max)) as u32
+}
+
+/// A quiet line under a settings section: the Test button's failure or the
+/// compositor's always-on-top hint.
+fn sound_note(text: String, is_error: bool) -> AnyElement {
+    div()
+        .debug_selector(move || {
+            if is_error {
+                "settings-sound-error".to_string()
+            } else {
+                "settings-topmost-hint".to_string()
+            }
+        })
+        .w_full()
+        .pb_2()
+        .text_size(px(theme::font_micro()))
+        .text_color(if is_error {
+            theme::DANGER
+        } else {
+            theme::text_muted()
+        })
+        .child(SharedString::from(text))
+        .into_any_element()
 }

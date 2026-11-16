@@ -1,7 +1,8 @@
 //! `~/.warp/pomodoro/settings.json`: the durations, the long-break cycle, the
-//! two auto-start switches and the desktop-notification switch. Versioned
-//! snake_case through the platform store, strict (`deny_unknown_fields`), and
-//! clamped on load so a hand-edited file can never make a zero-second phase.
+//! two auto-start switches, the notification and alert-sound switches, and the
+//! window the app opens in (with each mode's saved box). Versioned snake_case
+//! through the platform store, strict (`deny_unknown_fields`), and clamped on
+//! load so a hand-edited file can never make a zero-second phase.
 
 use serde::{Deserialize, Serialize};
 use warpui_kit_platform::config::Store;
@@ -21,6 +22,60 @@ pub const MINUTES_MAX: u32 = 24 * 60;
 pub const LONG_BREAK_EVERY_MIN: u32 = 1;
 pub const LONG_BREAK_EVERY_MAX: u32 = 12;
 
+/// The window the app opens in: the full dashboard or the compact card.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowMode {
+    /// The rail, the pages and the window controls.
+    #[default]
+    Full,
+    /// The small always-on-top card with the countdown and four controls.
+    Mini,
+}
+
+impl WindowMode {
+    /// The settings page's word for this mode.
+    pub fn label(self) -> &'static str {
+        match self {
+            WindowMode::Full => "Full screen",
+            WindowMode::Mini => "Mini screen",
+        }
+    }
+}
+
+/// A saved window box in window pixels. Integers keep the settings document
+/// `Eq` and stable in the file; the UI converts at the window boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowBox {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+}
+
+impl WindowBox {
+    /// A box a hand-edited file cannot turn into an unusable window: at least
+    /// the mini card, at most a very wide screen.
+    pub fn sane(self) -> Option<Self> {
+        const MIN_W: i32 = 260;
+        const MIN_H: i32 = 88;
+        const MAX: i32 = 16_384;
+        let sane = (MIN_W..=MAX).contains(&self.w) && (MIN_H..=MAX).contains(&self.h);
+        sane.then_some(self)
+    }
+
+    /// Clamps a box for the mini card: the card is small by design, so a
+    /// remembered tiled size (a compositor can report one) must not become
+    /// the card's box.
+    pub fn sane_card(self) -> Option<Self> {
+        const CARD_MAX_W: i32 = 720;
+        const CARD_MAX_H: i32 = 420;
+        let sane = self.sane()?;
+        (sane.w <= CARD_MAX_W && sane.h <= CARD_MAX_H).then_some(sane)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
@@ -32,6 +87,18 @@ pub struct Settings {
     pub auto_start_breaks: bool,
     pub auto_start_work: bool,
     pub desktop_notifications: bool,
+    /// The short chime at a phase end.
+    pub sound_enabled: bool,
+    /// A custom WAV/OGG the sound plays instead of the bundled chime; empty
+    /// means the bundled one.
+    pub sound_path: String,
+    /// The window the app opens in and lives in until the user switches.
+    pub window_mode: WindowMode,
+    /// Keep the mini card above other windows where the platform allows it.
+    pub always_on_top: bool,
+    /// Each mode's last box, restored the next time that mode opens.
+    pub bounds_full: Option<WindowBox>,
+    pub bounds_mini: Option<WindowBox>,
 }
 
 impl Default for Settings {
@@ -44,6 +111,12 @@ impl Default for Settings {
             auto_start_breaks: true,
             auto_start_work: false,
             desktop_notifications: true,
+            sound_enabled: true,
+            sound_path: String::new(),
+            window_mode: WindowMode::Full,
+            always_on_top: true,
+            bounds_full: None,
+            bounds_mini: None,
         }
     }
 }
@@ -92,6 +165,9 @@ impl Settings {
         self.long_break_every = self
             .long_break_every
             .clamp(LONG_BREAK_EVERY_MIN, LONG_BREAK_EVERY_MAX);
+        self.sound_path = self.sound_path.trim().to_string();
+        self.bounds_full = self.bounds_full.and_then(WindowBox::sane);
+        self.bounds_mini = self.bounds_mini.and_then(WindowBox::sane_card);
         self
     }
 
@@ -174,5 +250,73 @@ mod tests {
         settings.set_long_break_every(40);
         assert_eq!(settings.work_minutes, MINUTES_MIN);
         assert_eq!(settings.long_break_every, LONG_BREAK_EVERY_MAX);
+    }
+
+    #[test]
+    fn the_window_and_sound_defaults_are_settled() {
+        let settings = Settings::default();
+        assert!(settings.sound_enabled);
+        assert!(settings.sound_path.is_empty());
+        assert_eq!(settings.window_mode, WindowMode::Full);
+        assert!(settings.always_on_top);
+        assert_eq!(settings.bounds_full, None);
+        assert_eq!(settings.bounds_mini, None);
+    }
+
+    #[test]
+    fn a_file_without_the_new_keys_reads_the_defaults() {
+        let text = r#"{
+            "work_minutes": 30,
+            "short_break_minutes": 6,
+            "long_break_minutes": 20,
+            "long_break_every": 3,
+            "auto_start_breaks": false,
+            "auto_start_work": true,
+            "desktop_notifications": false
+        }"#;
+        let settings: Settings = serde_json::from_str(text).unwrap();
+        assert_eq!(settings.work_minutes, 30);
+        assert!(settings.sound_enabled, "the new keys take their defaults");
+        assert_eq!(settings.window_mode, WindowMode::Full);
+        assert!(settings.always_on_top);
+    }
+
+    #[test]
+    fn a_hand_edited_box_is_clamped_or_dropped() {
+        let sane = WindowBox {
+            x: 40,
+            y: 40,
+            w: 340,
+            h: 104,
+        };
+        assert_eq!(sane.sane(), Some(sane));
+        assert_eq!(
+            WindowBox {
+                w: 40,
+                h: 30,
+                ..sane
+            }
+            .sane(),
+            None
+        );
+        let settings = Settings {
+            bounds_mini: Some(WindowBox {
+                x: 0,
+                y: 0,
+                w: 1,
+                h: 1,
+            }),
+            sound_path: "  /tmp/ding.wav  ".into(),
+            ..Settings::default()
+        }
+        .normalized();
+        assert_eq!(settings.bounds_mini, None);
+        assert_eq!(settings.sound_path, "/tmp/ding.wav");
+    }
+
+    #[test]
+    fn a_legacy_unknown_key_still_fails_the_strict_read() {
+        let text = r#"{"window": {"mode": "mini"}}"#;
+        assert!(serde_json::from_str::<Settings>(text).is_err());
     }
 }

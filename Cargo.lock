@@ -2492,9 +2492,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-macros"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e545c497ffdad0afd840525e45707d522ab35d88f231d8f657ae1b331089d3b"
+checksum = "a926cfbda4204e849bb17a09872298d92838157088a7a3c32d9b31324ccaac8a"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -7673,13 +7673,14 @@ dependencies = [
 
 [[package]]
 name = "warp-pomodoro"
-version = "0.1.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "chrono",
  "gpui-kit",
  "gpui-pre",
  "gpui-pre-platform",
+ "raw-window-handle",
  "rust-embed",
  "serde",
  "serde_json",
@@ -7690,6 +7691,7 @@ dependencies = [
  "warpui-kit-build",
  "warpui-kit-core",
  "warpui-kit-platform",
+ "windows 0.62.2",
 ]
 
 [[package]]

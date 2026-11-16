@@ -1,6 +1,6 @@
 [package]
 name = "warp-pomodoro"
-version = "0.1.3"
+version = "0.2.4"
 edition = "2024"
 description = "WarpPomodoro — a focus timer with a live Warp Station rail page"
 license = "GPL-3.0"
@@ -47,6 +47,16 @@ warpui-kit-build = { git = "https://github.com/enginkirmaci/warp-suite", tag = "
 # same module, so the dependency stays behind cfg(windows).
 [target.'cfg(windows)'.dependencies]
 tauri-winrt-notification = "0.7"
+# the mini card's real topmost (`SetWindowPos`) and the alert chime
+# (`PlaySoundW`): both live behind this one crate, so the Linux build pays
+# nothing for them
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_UI_WindowsAndMessaging",
+] }
+# GPUI's own native-handle trait, at the version GPUI pins
+raw-window-handle = "0.6"
 
 # Release profile, shared with the suite (warp-suite's root manifest carries the
 # same three keys): thin LTO, one codegen unit and no symbol table.

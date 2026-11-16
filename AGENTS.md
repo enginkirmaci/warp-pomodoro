@@ -17,7 +17,16 @@ the modules and the binary is a thin bootstrap. The probes build the real
   cycle counter, completion and skip rules, the snapshot and the day counts.
   Display-free and I/O-free; its unit tests drive it a second at a time.
 - `src/settings.rs` — `~/.warp/pomodoro/settings.json` through the platform
-  store: versioned snake_case, strict, clamped on load.
+  store: versioned snake_case, strict, clamped on load. Carries the window
+  mode, each mode's saved box, the always-on-top intent and the sound switch
+  beside the timer knobs.
+- `src/sound.rs` — the alert chime: the bundled WAV written beside the
+  settings, the system player (`pw-play`/`paplay`/`aplay`, `PlaySoundW`,
+  `afplay`), and the custom-file fallback. Failures log once, never block.
+- `src/topmost.rs` — the always-on-top intent per platform: `SetWindowPos` on
+  Windows, Hyprland's own IPC on Linux (float the card by its address, pin it
+  when the setting is on), unsupported elsewhere (the setting is stored and
+  the Settings page says so).
 - `src/history.rs` — `~/.warp/pomodoro/history.json`: completed sessions,
   newest last, capped at the last 500 completed work sessions.
 - `src/state.rs` — the `state.json` writer: at most once a second and on every
@@ -26,8 +35,12 @@ the modules and the binary is a thin bootstrap. The probes build the real
   the UI tick), the blocking `Client`, and `try_forward`.
 - `src/notify.rs` — the phase-end desktop notification (`notify-send` on
   Linux, `tauri-winrt-notification` on Windows).
-- `src/ui/window.rs` — the titlebar, the rail, the 250 ms tick and the door
-  command pump.
+- `src/ui/window.rs` — the titlebar, the rail, the 250 ms tick, the door
+  command pump, the mode switch (full/mini), the window box tracking and the
+  frame driver.
+- `src/ui/ring.rs` — the countdown ring: the arc maths (unit tested), the head
+  dot and the bloom, painted through `PathBuilder` + `paint_path`.
+- `src/ui/mini.rs` — the mini card layout and its four controls.
 - `src/ui/{timer,history,settings,about}.rs` — the four pages.
 - `src/paths.rs`, `logging.rs`, `assets.rs`, `theme.rs` — the recipe wrappers.
 
@@ -45,6 +58,19 @@ warp-pomodoro [--start] [--version|-V]
 - A second launch forwards `focus` and exits before logging or migration.
 - Unknown args are ignored so a stale desktop shortcut never blocks the
   window.
+
+## Window modes and motion
+
+- The window opens in `settings.window_mode` (the first run opens the full
+  window) and remembers each mode's box; `WARP_POMODORO_MODE=full|mini`
+  overrides the mode for one launch (the capture hook, read once).
+- Switching modes saves the old box, writes the new mode, asks the platform
+  for the new intent (float/pin on Linux, topmost on Windows) and resizes.
+  The tick tracks `window.bounds()` every quarter second, so a drag or resize
+  is never lost; the close saves the settings file.
+- The ring requests animation frames only while the countdown runs or a bloom
+  plays, and never while the window is hidden. Paused means zero frames. The
+  kit's `motion::reduced()` keeps the ring static (no bloom, no pulse).
 
 ## Data and door contract
 

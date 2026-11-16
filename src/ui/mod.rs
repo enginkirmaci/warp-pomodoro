@@ -1,7 +1,10 @@
-//! ui module: the window, its four pages and the shared titlebar controls.
+//! ui module: the window, the mini card, its four pages, the countdown ring
+//! and the shared titlebar controls.
 
 pub mod about;
 pub mod history;
+pub mod mini;
+pub mod ring;
 pub mod settings;
 pub mod timer;
 pub mod window;

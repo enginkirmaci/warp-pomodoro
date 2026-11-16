@@ -10,9 +10,11 @@ pub mod logging;
 pub mod notify;
 pub mod paths;
 pub mod settings;
+pub mod sound;
 pub mod state;
 pub mod theme;
 pub mod timer;
+pub mod topmost;
 pub mod ui;
 
 /// The version the door's `ping` and the snapshot's `version` report.
