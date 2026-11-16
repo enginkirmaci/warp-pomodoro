@@ -1,6 +1,6 @@
 [package]
 name = "warp-pomodoro"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2024"
 description = "WarpPomodoro — a focus timer with a live Warp Station rail page"
 license = "GPL-3.0"
@@ -12,8 +12,10 @@ publish = false
 
 [dependencies]
 # kit line: pinned by tag, patched to kits/ by warp-suite's local build
-warpui-kit-core = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.1.40", package = "warpui-kit-core" }
-warpui-kit-platform = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.1.40", package = "warpui-kit-platform" }
+warpui-kit-core = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.2.49", package = "warpui-kit-core" }
+warpui-kit-platform = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.2.49", package = "warpui-kit-platform" }
+# the About screen's license card renders the GPL as read-only markdown
+warpui-kit-markdown = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.2.49", package = "warpui-kit-markdown" }
 
 # the gpui stack, pinned here because the app builds standalone
 gpui = { package = "gpui-pre", version = "=0.3.11" }
@@ -39,7 +41,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 gpui-kit = { version = "0.9", features = ["test-support"] }
 
 [build-dependencies]
-warpui-kit-build = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.1.40", package = "warpui-kit-build" }
+warpui-kit-build = { git = "https://github.com/enginkirmaci/warp-suite", tag = "kits-v0.2.49", package = "warpui-kit-build" }
 
 # WinRT toasts on Windows (Action Center): the crate wraps Windows.UI.Notifications
 # and falls back to PowerShell's whitelisted AppUserModelID, so toasts appear

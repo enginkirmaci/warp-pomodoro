@@ -1,8 +1,9 @@
 //! `~/.warp/pomodoro/settings.json`: the durations, the long-break cycle, the
-//! two auto-start switches, the notification and alert-sound switches, and the
-//! window the app opens in (with each mode's saved box). Versioned snake_case
-//! through the platform store, strict (`deny_unknown_fields`), and clamped on
-//! load so a hand-edited file can never make a zero-second phase.
+//! two auto-start switches, the notification and alert-sound switches, the
+//! reduced-motion choice, and the window the app opens in (with each mode's
+//! saved box). Versioned snake_case through the platform store, strict
+//! (`deny_unknown_fields`), and clamped on load so a hand-edited file can
+//! never make a zero-second phase.
 
 use serde::{Deserialize, Serialize};
 use warpui_kit_platform::config::Store;
@@ -15,8 +16,8 @@ pub const SHORT_BREAK_MINUTES: u32 = 5;
 pub const LONG_BREAK_MINUTES: u32 = 15;
 pub const LONG_BREAK_EVERY: u32 = 4;
 
-/// The bounds a hand-edited file is clamped into: a phase is at least one
-/// minute and at most a day, and a cycle is 1..=12 focus sessions.
+/// The bounds a hand-edited file is clamped into: a phase runs 1..=1440
+/// minutes (a whole day is legal), and a cycle is 1..=12 focus sessions.
 pub const MINUTES_MIN: u32 = 1;
 pub const MINUTES_MAX: u32 = 24 * 60;
 pub const LONG_BREAK_EVERY_MIN: u32 = 1;
@@ -92,6 +93,10 @@ pub struct Settings {
     /// A custom WAV/OGG the sound plays instead of the bundled chime; empty
     /// means the bundled one.
     pub sound_path: String,
+    /// The family's motion switch: keeps the countdown ring still, with no
+    /// phase-end bloom and no in-between frames.
+    #[serde(default)]
+    pub reduce_motion: bool,
     /// The window the app opens in and lives in until the user switches.
     pub window_mode: WindowMode,
     /// Keep the mini card above other windows where the platform allows it.
@@ -113,6 +118,7 @@ impl Default for Settings {
             desktop_notifications: true,
             sound_enabled: true,
             sound_path: String::new(),
+            reduce_motion: false,
             window_mode: WindowMode::Full,
             always_on_top: true,
             bounds_full: None,
@@ -277,6 +283,7 @@ mod tests {
         let settings: Settings = serde_json::from_str(text).unwrap();
         assert_eq!(settings.work_minutes, 30);
         assert!(settings.sound_enabled, "the new keys take their defaults");
+        assert!(!settings.reduce_motion, "the motion switch defaults off");
         assert_eq!(settings.window_mode, WindowMode::Full);
         assert!(settings.always_on_top);
     }

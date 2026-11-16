@@ -16,6 +16,7 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use warpui_kit_core::about;
+use warpui_kit_core::motion;
 use warpui_kit_core::shell;
 
 use crate::history::History;
@@ -105,11 +106,22 @@ pub struct MainWindow {
     pub(crate) timer: Timer,
     pub(crate) section: Section,
     pub(crate) about_selected: about::AppId,
-    /// The installed members the About list renders; probed on first open and
-    /// refreshed each time About is picked from the rail.
+    /// The installed members the About list renders: the running app from the
+    /// build facts, then the siblings the one background scan finds.
     pub(crate) about_members: Vec<about::Member>,
+    /// The one background sibling scan has been started; a second About open
+    /// keeps the list it found.
+    pub(crate) about_scan_started: bool,
+    /// The GPL card is up over the About section.
+    pub(crate) about_license_open: bool,
+    /// The license document, built the first time the card opens: read-only
+    /// markdown, so the GPL reads as prose and its text is selectable.
+    pub(crate) about_license: Option<Entity<warpui_kit_markdown::LiveEditorState>>,
     /// The window's layout: the full dashboard or the mini card.
     pub(crate) mode: WindowMode,
+    /// The keyboard sheet is up and owns the keys.
+    shortcut_open: bool,
+    shortcut_focus: FocusHandle,
     /// The alert-sound path field, shown on the Settings page.
     pub(crate) sound_path: Entity<InputState>,
     /// The Test button's last failure, cleared by a successful play.
@@ -178,8 +190,18 @@ impl MainWindow {
             timer,
             section,
             about_selected: about::AppId::Pomodoro,
-            about_members: Vec::new(),
+            about_members: vec![about::current_member(
+                about::AppId::Pomodoro,
+                &warpui_kit_core::build_info!(),
+            )],
+            about_scan_started: false,
+            about_license_open: false,
+            about_license: None,
             mode,
+            // E2E hook: WARP_POMODORO_SHORTCUTS=1 opens the keyboard sheet on
+            // launch, the family's capture hook for that card.
+            shortcut_open: matches!(std::env::var("WARP_POMODORO_SHORTCUTS").as_deref(), Ok("1")),
+            shortcut_focus: cx.focus_handle(),
             sound_path: sound_path.clone(),
             sound_test: None,
             writer: Writer::new(),
@@ -220,6 +242,11 @@ impl MainWindow {
             true
         });
         window.focus(&this.page_focus, cx);
+        // the capture hook can open the About section on launch; its sibling
+        // scan starts with it, so a capture shows the installed members
+        if section == Section::About {
+            this.refresh_about_members(cx);
+        }
         // the tick parks on a background timer; the entity's update fails once
         // the window is gone, which ends the loop
         cx.spawn_in(window, async move |this, cx| {
@@ -240,10 +267,12 @@ impl MainWindow {
     /// The rail's open section.
     pub(crate) fn set_section(&mut self, section: Section, cx: &mut Context<Self>) {
         if self.section != section {
-            if section == Section::About {
-                self.about_members.clear();
-            }
             self.section = section;
+            if section == Section::About {
+                // the first About open starts the one sibling scan; the list
+                // already shows this app, and the scan fills in the rest
+                self.refresh_about_members(cx);
+            }
             cx.notify();
         }
     }
@@ -295,23 +324,17 @@ impl MainWindow {
         self.settings.window_mode = mode;
         self.settings.save();
         // Linux: a tiled window ignores its own size, so float it before the
-        // resize; Windows carries the topmost flag at the same time
-        // the card floats and takes its own box; leaving it returns the window
-        // to the layout, where the compositor owns the size (a tiling desktop
-        // re-tiles it) — Windows restores the saved full-window box instead
+        // resize, and leaving the card drops the float so the layout can own
+        // the full window again. The resize runs in both directions: the float
+        // only decides who re-tiles, and a compositor without its own IPC would
+        // otherwise keep the card's box around the dashboard.
         self.apply_topmost(window);
-        #[cfg(target_os = "linux")]
-        let restore_box = mode == WindowMode::Mini;
-        #[cfg(not(target_os = "linux"))]
-        let restore_box = true;
-        if restore_box {
-            let (width, height) = self.mode_size(mode);
-            window.resize(gpui::size(px(width), px(height)));
-            // Wayland treats the client's size request as a hint; where the
-            // compositor has its own IPC (Hyprland), the box is asked for
-            // directly so the window and the card cannot disagree
-            crate::topmost::resize(window, width, height);
-        }
+        let (width, height) = self.mode_size(mode);
+        window.resize(gpui::size(px(width), px(height)));
+        // Wayland treats the client's size request as a hint; where the
+        // compositor has its own IPC (Hyprland), the box is asked for directly
+        // so the window and the card cannot disagree
+        crate::topmost::resize(window, width, height);
         cx.notify();
     }
 
@@ -404,11 +427,16 @@ impl MainWindow {
         } else {
             self.timer.remaining_seconds() as f32
         };
-        let bloom = self.bloom.and_then(|started| {
-            let t = now.saturating_duration_since(started).as_secs_f32()
-                / (theme::BLOOM_MS as f32 / 1000.);
-            (t < 1.).then_some(t)
-        });
+        // reduced motion keeps the ring still: no phase-end bloom
+        let bloom = if motion::reduced() {
+            None
+        } else {
+            self.bloom.and_then(|started| {
+                let t = now.saturating_duration_since(started).as_secs_f32()
+                    / (theme::BLOOM_MS as f32 / 1000.);
+                (t < 1.).then_some(t)
+            })
+        };
         RingState {
             progress: crate::ui::ring::progress(remaining, total),
             bloom,
@@ -416,12 +444,14 @@ impl MainWindow {
     }
 
     /// Whether the window needs a new frame right now: the clock moves or the
-    /// bloom plays. A paused timer with no bloom requests nothing.
+    /// bloom plays. A paused timer with no bloom requests nothing, and reduced
+    /// motion leaves the ring still between ticks.
     fn animating(&self, now: Instant) -> bool {
-        self.timer.running()
-            || self.bloom.is_some_and(|started| {
-                now.saturating_duration_since(started) < Duration::from_millis(theme::BLOOM_MS)
-            })
+        !motion::reduced()
+            && (self.timer.running()
+                || self.bloom.is_some_and(|started| {
+                    now.saturating_duration_since(started) < Duration::from_millis(theme::BLOOM_MS)
+                }))
     }
 
     fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -517,8 +547,11 @@ impl MainWindow {
         }
         self.history.save();
         // one bloom and one chime per tick, even when a suspended window
-        // walked several phases at once
-        self.bloom = Some(Instant::now());
+        // walked several phases at once; reduced motion drops the bloom and
+        // keeps the chime
+        if !motion::reduced() {
+            self.bloom = Some(Instant::now());
+        }
         if self.settings.sound_enabled {
             crate::sound::play(&self.settings);
         }
@@ -739,10 +772,40 @@ impl MainWindow {
     }
 }
 
+/// The full window's keys: the countdown and the mode switch, then the sheet
+/// itself.
+const TIMER_SHORTCUTS: &[(&str, &str)] = &[
+    ("Space", "Start or pause the countdown"),
+    ("M", "Switch between the dashboard and the mini screen"),
+    ("? / Ctrl+/", "This cheat sheet"),
+];
+
+/// The mini card answers two keys of its own on top of the window's.
+const MINI_SHORTCUTS: &[(&str, &str)] = &[
+    ("P", "Pin the card above other windows"),
+    ("Esc", "Expand back to the dashboard"),
+];
+
+/// The shared card's content: the two groups the window's handler answers to.
+fn shortcut_groups() -> Vec<warpui_kit_core::shortcuts::Group> {
+    [("Timer", TIMER_SHORTCUTS), ("Mini screen", MINI_SHORTCUTS)]
+        .into_iter()
+        .map(|(title, rows)| {
+            warpui_kit_core::shortcuts::Group::new(
+                title,
+                rows.iter()
+                    .map(|(keys, label)| ((*keys).into(), (*label).into()))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
 impl MainWindow {
-    /// The window's plain-key shortcuts: `Space` on any screen, and the mini
-    /// card's own set. The key handler sits on the window root, so an input
-    /// that owns the keys keeps them (typing a space in Settings stays typing).
+    /// The window's plain-key shortcuts: `Space` on any screen, the mini card's
+    /// own set, and the two help chords. The key handler sits on the window
+    /// root, so an input that owns the keys keeps them (typing a space in
+    /// Settings stays typing).
     fn handle_key(
         &mut self,
         event: &gpui::KeyDownEvent,
@@ -750,10 +813,47 @@ impl MainWindow {
         cx: &mut Context<Self>,
     ) {
         let modifiers = event.keystroke.modifiers;
+        let key = event.keystroke.key.as_str();
+        // `?` and Ctrl+/ are the sheet. Ctrl+/ stays global (it is the chord
+        // the family answers); a bare `?` would be typing in the sound-path
+        // field, so it only opens when no text surface owns the keys.
+        let in_field = window
+            .context_stack()
+            .iter()
+            .any(|context| context.contains("Input"));
+        let help_key = !modifiers.alt
+            && !modifiers.platform
+            && (event.keystroke.key_char.as_deref() == Some("?")
+                || key == "?"
+                || (key == "/" && (modifiers.shift || modifiers.control)));
+        // the sheet owns the keyboard while it is up: the help chord closes
+        // it and nothing behind it fires
+        if self.shortcut_open {
+            if help_key || key == "escape" {
+                self.close_shortcuts(window, cx);
+            }
+            cx.stop_propagation();
+            return;
+        }
+        // the license is the same kind of layer: Escape puts it away and
+        // nothing behind it fires
+        if self.about_license_open {
+            if key == "escape" {
+                self.about_license_open = false;
+                cx.notify();
+            }
+            cx.stop_propagation();
+            return;
+        }
+        if help_key && (modifiers.control || !in_field) {
+            self.open_shortcuts(window, cx);
+            cx.stop_propagation();
+            return;
+        }
         if modifiers.control || modifiers.alt || modifiers.platform {
             return;
         }
-        match event.keystroke.key.as_str() {
+        match key {
             "space" => {
                 self.toggle_timer(cx);
                 cx.stop_propagation();
@@ -772,6 +872,43 @@ impl MainWindow {
             }
             _ => {}
         }
+    }
+
+    /// Opens the keyboard sheet and gives it the keys, so no shortcut fires
+    /// behind the card.
+    fn open_shortcuts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shortcut_open {
+            return;
+        }
+        self.shortcut_open = true;
+        window.focus(&self.shortcut_focus, cx);
+        cx.notify();
+    }
+
+    /// Closes the sheet and hands the keyboard back to the page root; a focused
+    /// element that left the page would otherwise leave the keys dead until
+    /// the next click.
+    fn close_shortcuts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.shortcut_open {
+            return;
+        }
+        self.shortcut_open = false;
+        window.focus(&self.page_focus, cx);
+        cx.notify();
+    }
+
+    fn render_shortcuts(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let groups = shortcut_groups();
+        let page = cx.entity();
+        warpui_kit_core::shortcuts::dialog(
+            "shortcut-sheet",
+            "Keyboard shortcuts",
+            &groups,
+            &self.shortcut_focus,
+            move |_, window, cx| {
+                page.update(cx, |this, cx| this.close_shortcuts(window, cx));
+            },
+        )
     }
 }
 
@@ -794,11 +931,10 @@ impl Render for MainWindow {
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 this.handle_key(event, window, cx);
             }));
-        if self.mode == WindowMode::Mini {
-            return root.child(self.render_mini(window, cx)).into_any_element();
-        }
-        root.child(self.render_titlebar(window, cx))
-            .child(
+        let mut page = if self.mode == WindowMode::Mini {
+            root.child(self.render_mini(window, cx))
+        } else {
+            root.child(self.render_titlebar(window, cx)).child(
                 div()
                     .id("pomodoro-body")
                     .debug_selector(|| "pomodoro-body".into())
@@ -811,7 +947,16 @@ impl Render for MainWindow {
                     .child(self.render_rail(cx))
                     .child(self.render_body(window, cx)),
             )
-            .into_any_element()
+        };
+        // the two layers sit over the page: the keyboard sheet, and the GPL
+        // card when About's Legal row opened it
+        if self.shortcut_open {
+            page = page.child(self.render_shortcuts(cx));
+        }
+        if self.about_license_open {
+            page = page.child(self.render_about_license(window, cx));
+        }
+        page.into_any_element()
     }
 }
 

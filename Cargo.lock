@@ -7673,7 +7673,7 @@ dependencies = [
 
 [[package]]
 name = "warp-pomodoro"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -7690,22 +7690,23 @@ dependencies = [
  "tracing-subscriber",
  "warpui-kit-build",
  "warpui-kit-core",
+ "warpui-kit-markdown",
  "warpui-kit-platform",
  "windows 0.62.2",
 ]
 
 [[package]]
 name = "warpui-kit-build"
-version = "0.1.40"
-source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.1.40#14936872524edb48e8489fcf2db664c72bcc9ed2"
+version = "0.2.49"
+source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.49#e9b73c96d435e06d44a9bf639363a55e0ce33d7a"
 dependencies = [
  "winresource",
 ]
 
 [[package]]
 name = "warpui-kit-core"
-version = "0.1.40"
-source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.1.40#14936872524edb48e8489fcf2db664c72bcc9ed2"
+version = "0.2.49"
+source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.49#e9b73c96d435e06d44a9bf639363a55e0ce33d7a"
 dependencies = [
  "async-channel",
  "futures-util",
@@ -7719,9 +7720,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "warpui-kit-diff"
+version = "0.2.49"
+source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.49#e9b73c96d435e06d44a9bf639363a55e0ce33d7a"
+dependencies = [
+ "gpui-kit",
+ "gpui-pre",
+ "serde_json",
+ "similar",
+ "warpui-kit-core",
+]
+
+[[package]]
+name = "warpui-kit-markdown"
+version = "0.2.49"
+source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.49#e9b73c96d435e06d44a9bf639363a55e0ce33d7a"
+dependencies = [
+ "anyhow",
+ "gpui-kit",
+ "gpui-pre",
+ "log",
+ "markdown",
+ "unicode-segmentation",
+ "warpui-kit-core",
+ "warpui-kit-diff",
+]
+
+[[package]]
 name = "warpui-kit-platform"
-version = "0.1.40"
-source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.1.40#14936872524edb48e8489fcf2db664c72bcc9ed2"
+version = "0.2.49"
+source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.49#e9b73c96d435e06d44a9bf639363a55e0ce33d7a"
 dependencies = [
  "anyhow",
  "gpui-kit",

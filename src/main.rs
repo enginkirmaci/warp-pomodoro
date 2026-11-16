@@ -54,14 +54,22 @@ fn main() {
     application()
         .with_assets(assets::EmbedAssets::new())
         .run(move |cx: &mut App| {
-            warpui_kit_core::bootstrap::init(cx, None, false, |cx: &mut gpui::App| {
-                theme::apply_kit_theme(cx);
-            });
+            // the settings are read before the first frame: the reduce-motion
+            // choice (or the desktop's own preference) has to reach the
+            // bootstrap, and the window opens at the saved box below
+            let settings = Settings::load();
+            warpui_kit_core::bootstrap::init(
+                cx,
+                None,
+                settings.reduce_motion || warpui_kit_core::motion::system_prefers_reduced(),
+                |cx: &mut gpui::App| {
+                    theme::apply_kit_theme(cx);
+                },
+            );
 
             // the window opens in the mode the last session left (or the
             // capture hook asks for) and at that mode's saved box
             let mode = launch_mode();
-            let settings = Settings::load();
             let saved = match mode {
                 WindowMode::Full => settings.bounds_full,
                 WindowMode::Mini => settings.bounds_mini,

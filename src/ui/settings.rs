@@ -1,7 +1,7 @@
 //! The Settings page: the durations, the long-break cycle, the two auto-start
-//! switches, the notification switch, and the family's text-size and palette
-//! controls. Everything applies at once — the design has no Save — and lands
-//! in `~/.warp/pomodoro/settings.json`.
+//! switches, the notification switch, the reduce-motion switch, and the
+//! family's text-size and palette controls. Everything applies at once — the
+//! design has no Save — and lands in `~/.warp/pomodoro/settings.json`.
 
 use gpui::Focusable as _;
 use gpui::prelude::*;
@@ -187,6 +187,17 @@ impl MainWindow {
             warpui_kit_core::palette_control(),
             false,
         ));
+        rows.push(kit::switch_row_with_desc(
+            "switch-reduce-motion",
+            "Reduce motion",
+            "settings-row-Reduce motion",
+            "Keeps the ring still and drops the phase-end bloom; the countdown keeps its time",
+            settings.reduce_motion,
+            false,
+            cx.listener(|this, on: &bool, _, cx| {
+                this.set_reduce_motion(*on, cx);
+            }),
+        ));
 
         shell::detail_pane()
             .debug_selector(|| "settings-page".into())
@@ -244,6 +255,18 @@ impl MainWindow {
                     .child(test),
             )
             .into_any_element()
+    }
+
+    /// The motion choice applies at once: the kit's global switch flips, every
+    /// window repaints without the animation it would have played, and the
+    /// settings file already holds it.
+    fn set_reduce_motion(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.settings.reduce_motion = on;
+        warpui_kit_core::motion::set_reduced(
+            on || warpui_kit_core::motion::system_prefers_reduced(),
+        );
+        self.settings_changed(cx);
+        cx.refresh_windows();
     }
 
     /// A duration stepper: the value between two small −/+ buttons.

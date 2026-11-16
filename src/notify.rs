@@ -45,13 +45,13 @@ pub fn publish(summary: &str, body: &str) -> Result<(), String> {
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        std::process::Command::new("notify-send")
-            .arg("--app-name=Warp Pomodoro")
-            .arg(summary)
-            .arg(body)
-            .spawn()
-            .map(|_| ())
-            .map_err(|err| format!("notify-send: {err}"))
+        crate::spawn::detached(
+            std::process::Command::new("notify-send")
+                .arg("--app-name=Warp Pomodoro")
+                .arg(summary)
+                .arg(body),
+        )
+        .map_err(|err| format!("notify-send: {err}"))
     }
 
     #[cfg(windows)]

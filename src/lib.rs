@@ -11,6 +11,7 @@ pub mod notify;
 pub mod paths;
 pub mod settings;
 pub mod sound;
+pub(crate) mod spawn;
 pub mod state;
 pub mod theme;
 pub mod timer;

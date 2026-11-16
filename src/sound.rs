@@ -114,24 +114,24 @@ fn play_file(path: &Path) -> Result<(), SoundError> {
     {
         let player =
             player().ok_or_else(|| "no audio player (pw-play, paplay, aplay)".to_string())?;
-        std::process::Command::new(player)
-            .arg(path)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map(|_| ())
-            .map_err(|err| format!("{player}: {err}"))
+        crate::spawn::detached(
+            std::process::Command::new(player)
+                .arg(path)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null()),
+        )
+        .map_err(|err| format!("{player}: {err}"))
     }
 
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("afplay")
-            .arg(path)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map(|_| ())
-            .map_err(|err| format!("afplay: {err}"))
+        crate::spawn::detached(
+            std::process::Command::new("afplay")
+                .arg(path)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null()),
+        )
+        .map_err(|err| format!("afplay: {err}"))
     }
 }
 
