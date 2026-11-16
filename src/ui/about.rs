@@ -1,6 +1,6 @@
-//! The About section: the family in the list, the selected member in the
-//! detail. The screen itself is `warpui_kit_core::about`; this holds the one
-//! piece of state it needs and the effects behind its verbs, so every app's
+//! The About section: the installed family in the list, the selected member in
+//! the detail. The screen itself is `warpui_kit_core::about`; this holds the
+//! one piece of state it needs and the effects behind its verbs, so every app's
 //! About behaves the same and only the rail plumbing differs.
 
 use gpui::prelude::*;
@@ -12,9 +12,9 @@ use crate::theme;
 use crate::ui::window::{MainWindow, launch_sibling};
 
 impl MainWindow {
-    /// The rail's About section: the suite members in the list, the selected
-    /// one's identity, Build and Legal cards in the detail. It opens on
-    /// Pomodoro, the app you are in.
+    /// The rail's About section: the installed members in the list, the
+    /// selected one's identity, Build and Legal cards in the detail. It opens
+    /// on Pomodoro, the app you are in.
     pub(crate) fn render_about(
         &mut self,
         window: &Window,
@@ -22,7 +22,6 @@ impl MainWindow {
     ) -> gpui::AnyElement {
         use warpui_kit_core::about::AppId;
 
-        let build = warpui_kit_core::build_info!();
         // the list takes a quarter of the window, between the compact floor
         // (the detail's cards need their 320) and the family's full list width
         let width = (window.viewport_size().width.as_f32() * 0.26).clamp(
@@ -31,6 +30,10 @@ impl MainWindow {
         );
         let selected = self.about_selected;
         let current = AppId::Pomodoro;
+        if self.about_members.is_empty() {
+            let build = warpui_kit_core::build_info!();
+            self.about_members = about::detect_installed(current, &build);
+        }
 
         let entity = cx.entity();
         let pick = entity.clone();
@@ -54,11 +57,17 @@ impl MainWindow {
         shell::panes()
             .min_w_0()
             .debug_selector(|| "about-page".into())
-            .child(about::list(width, selected, current, &build, on_pick))
+            .child(about::list(
+                width,
+                selected,
+                current,
+                &self.about_members,
+                on_pick,
+            ))
             .child(about::detail(
                 selected,
                 current,
-                &build,
+                &self.about_members,
                 "Open Station",
                 on_action,
                 on_link,
@@ -78,9 +87,14 @@ impl MainWindow {
             about::Action::OpenApp(id) => launch_sibling(about::app(id).binary),
             about::Action::SnapIt => launch_sibling("warp-station"),
             about::Action::CopyVersion => {
-                let build = warpui_kit_core::build_info!();
-                let line = build.version_line(about::app(self.about_selected));
-                cx.write_to_clipboard(ClipboardItem::new_string(line));
+                let Some(member) = about::selected_member(
+                    &self.about_members,
+                    self.about_selected,
+                    about::AppId::Pomodoro,
+                ) else {
+                    return;
+                };
+                cx.write_to_clipboard(ClipboardItem::new_string(member.version_line()));
             }
         }
     }

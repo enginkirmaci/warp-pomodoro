@@ -105,6 +105,9 @@ pub struct MainWindow {
     pub(crate) timer: Timer,
     pub(crate) section: Section,
     pub(crate) about_selected: about::AppId,
+    /// The installed members the About list renders; probed on first open and
+    /// refreshed each time About is picked from the rail.
+    pub(crate) about_members: Vec<about::Member>,
     /// The window's layout: the full dashboard or the mini card.
     pub(crate) mode: WindowMode,
     /// The alert-sound path field, shown on the Settings page.
@@ -175,6 +178,7 @@ impl MainWindow {
             timer,
             section,
             about_selected: about::AppId::Pomodoro,
+            about_members: Vec::new(),
             mode,
             sound_path: sound_path.clone(),
             sound_test: None,
@@ -236,6 +240,9 @@ impl MainWindow {
     /// The rail's open section.
     pub(crate) fn set_section(&mut self, section: Section, cx: &mut Context<Self>) {
         if self.section != section {
+            if section == Section::About {
+                self.about_members.clear();
+            }
             self.section = section;
             cx.notify();
         }
