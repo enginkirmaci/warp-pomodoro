@@ -47,8 +47,8 @@ warp-pomodoro [--start] [--version|-V]
 - Bare launch opens the window, paused at the start of a work phase.
 - `--start` starts (or resumes) a work session as soon as the window opens.
   Warp Station's page uses it when the door is down.
-- `--version` / `-V` prints the family build line (`Warp Pomodoro 0.1.0 (build
-  1 · abc1234) · dev`) and exits.
+- `--version` / `-V` prints the family version line (`Warp Pomodoro 0.1.0
+  (abc1234) · dev`) and exits.
 - Unknown args are ignored so a stale desktop shortcut never blocks the
   window.
 - The window opens in the mode saved in the settings; `WARP_POMODORO_MODE=full`

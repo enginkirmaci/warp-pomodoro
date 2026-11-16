@@ -54,7 +54,7 @@ warp-pomodoro [--start] [--version|-V]
   is never persisted as running across launches.
 - `--start` starts (or resumes) a work session at window open. Warp Station
   uses it instead of the door when the app is down.
-- `--version` / `-V` prints the family build line, first, before forwarding.
+- `--version` / `-V` prints the family version line, first, before forwarding.
 - A second launch forwards `focus` and exits before logging or migration.
 - Unknown args are ignored so a stale desktop shortcut never blocks the
   window.
