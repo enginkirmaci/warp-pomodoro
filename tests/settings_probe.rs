@@ -1,7 +1,8 @@
 //! The settings store: the settled defaults, the versioned snake_case file,
-//! the clamps a hand-edited file is pulled into, and the strict schema. Runs
-//! under a scratch HOME for the whole binary, since every path resolves from
-//! it; the scenarios take turns behind a lock.
+//! the clamps a hand-edited file is pulled into, and the tolerant schema (a
+//! key this build does not know is carried, not refused). Runs under a
+//! scratch HOME for the whole binary, since every path resolves from it; the
+//! scenarios take turns behind a lock.
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -115,24 +116,37 @@ fn a_hand_edited_file_is_clamped_on_load() {
 }
 
 #[test]
-fn the_schema_is_strict_and_a_file_it_cannot_read_falls_back_to_defaults() {
+fn an_unknown_key_reads_and_is_carried_instead_of_failing_the_document() {
     let _guard = hold();
     scratch_home();
     reset_file();
-    // an unknown key is refused by the typed document itself
-    assert!(
-        serde_json::from_str::<Settings>(r#"{"work_minutes":30,"unknown_key":1}"#).is_err(),
-        "the settings document denies unknown fields"
-    );
-    // and the live store leaves such a file alone instead of rewriting it
-    write_raw(r#"{"schema_version":1,"work_minutes":30,"unknown_key":1}"#);
+    // the typed document reads the keys it knows and ignores the rest
+    let parsed: Settings =
+        serde_json::from_str(r#"{"work_minutes":30,"unknown_key":1}"#).expect("a tolerant read");
+    assert_eq!(parsed.work_minutes, 30);
+
+    // a pre-versioning file is imported once: the keys this build knows come
+    // over, and the importer's rewrite drops the one it does not translate
+    write_raw(r#"{"work_minutes":30,"unknown_key":1}"#);
     let settings = Settings::load();
-    assert_eq!(settings, Settings::default());
-    assert_eq!(
-        read_json()["work_minutes"],
-        30,
-        "the unreadable file is not overwritten"
+    assert_eq!(settings.work_minutes, 30);
+    let saved = read_json();
+    assert_eq!(saved["schema_version"], 1);
+    assert_eq!(saved["work_minutes"], 30);
+    assert!(
+        saved.get("unknown_key").is_none(),
+        "the importer drops the legacy key: {saved}"
     );
+
+    // a versioned file a newer build wrote keeps its extra key through a save
+    write_raw(r#"{"schema_version":1,"work_minutes":30,"unknown_key":1}"#);
+    let mut settings = Settings::load();
+    assert_eq!(settings.work_minutes, 30);
+    settings.set_work_minutes(45);
+    settings.save();
+    let saved = read_json();
+    assert_eq!(saved["work_minutes"], 45);
+    assert_eq!(saved["unknown_key"], 1, "the newer key survives: {saved}");
 }
 
 #[test]

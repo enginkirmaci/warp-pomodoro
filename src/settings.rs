@@ -1,9 +1,10 @@
 //! `~/.warp/pomodoro/settings.json`: the durations, the long-break cycle, the
 //! two auto-start switches, the notification and alert-sound switches, the
 //! reduced-motion choice, and the window the app opens in (with each mode's
-//! saved box). Versioned snake_case through the platform store, strict
-//! (`deny_unknown_fields`), and clamped on load so a hand-edited file can
-//! never make a zero-second phase.
+//! saved box). Versioned snake_case through the platform store, tolerant of
+//! keys a newer build wrote (they are carried through the next save, so
+//! switching builds never drops a section), and clamped on load so a
+//! hand-edited file can never make a zero-second phase.
 
 use serde::{Deserialize, Serialize};
 use warpui_kit_platform::config::Store;
@@ -47,7 +48,6 @@ impl WindowMode {
 /// A saved window box in window pixels. Integers keep the settings document
 /// `Eq` and stable in the file; the UI converts at the window boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct WindowBox {
     pub x: i32,
     pub y: i32,
@@ -78,7 +78,7 @@ impl WindowBox {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Settings {
     pub work_minutes: u32,
     pub short_break_minutes: u32,
@@ -130,11 +130,12 @@ impl Default for Settings {
 impl Settings {
     /// Reads the settings. A missing file is the defaults; a pre-versioning
     /// file is imported once and rewritten with the version, and a file this
-    /// build cannot read (a newer schema, a corrupt or unknown key) leaves the
-    /// file alone and runs on the defaults.
+    /// build cannot read (a newer schema, corrupt JSON) leaves the file alone
+    /// and runs on the defaults. A key this build does not know is not an
+    /// error: it is carried through the next save.
     pub fn load() -> Self {
         let path = AppPaths::settings_file();
-        let store = Store::<Settings>::new(path.clone());
+        let store = Store::<Settings>::new(path.clone()).preserving_unknown();
         match store.load() {
             Ok(settings) => settings.normalized(),
             Err(err) if err.needs_import() => {
@@ -156,7 +157,7 @@ impl Settings {
     }
 
     pub fn save(&self) {
-        let store = Store::<Settings>::new(AppPaths::settings_file());
+        let store = Store::<Settings>::new(AppPaths::settings_file()).preserving_unknown();
         if let Err(err) = store.save(self) {
             tracing::warn!("could not save the settings: {err}");
         }
@@ -250,6 +251,36 @@ mod tests {
     }
 
     #[test]
+    fn a_newer_settings_file_loads_and_keeps_its_unknown_keys() {
+        // the store pair `load`/`save` use: a file a newer build wrote reads
+        // with the keys this build knows, and the next save keeps the rest
+        let dir = std::env::temp_dir().join(format!(
+            "warp-pomodoro-settings-newer-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"schema_version":1,"work_minutes":50,"later_flag":true,"window_mode":"mini"}"#,
+        )
+        .unwrap();
+
+        let store = Store::<Settings>::new(path.clone()).preserving_unknown();
+        let mut settings = store.load().expect("a newer file still loads");
+        assert_eq!(settings.work_minutes, 50);
+        settings.work_minutes = 45;
+        store.save(&settings).unwrap();
+
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved["later_flag"], true, "the newer key survives");
+        assert_eq!(saved["work_minutes"], 45);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_setters_keep_the_bounds() {
         let mut settings = Settings::default();
         settings.set_work_minutes(0);
@@ -322,8 +353,11 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_unknown_key_still_fails_the_strict_read() {
+    fn a_legacy_unknown_key_reads_as_defaults_instead_of_failing() {
+        // a pre-versioning file is the importer's input: the keys this build
+        // knows are read, the rest are dropped rather than failing the read
         let text = r#"{"window": {"mode": "mini"}}"#;
-        assert!(serde_json::from_str::<Settings>(text).is_err());
+        let settings: Settings = serde_json::from_str(text).expect("a tolerant read");
+        assert_eq!(settings, Settings::default());
     }
 }
