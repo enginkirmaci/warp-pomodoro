@@ -136,8 +136,6 @@ cargo build -p warp-pomodoro
 
 - Never commit a token, PAT, password, private IP, Wi-Fi SSID, home path or
   personal email in file content. Use placeholders in docs and examples.
-- A commit's author and committer are public. Use a public identity (the
-  GitHub noreply address), never a private address.
 - Pass credentials through GitHub Actions secrets only; never echo or log
   them.
 
