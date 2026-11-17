@@ -7673,7 +7673,7 @@ dependencies = [
 
 [[package]]
 name = "warp-pomodoro"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "anyhow",
  "chrono",
@@ -7697,16 +7697,16 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-build"
-version = "0.2.49"
-source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.49#e9b73c96d435e06d44a9bf639363a55e0ce33d7a"
+version = "0.2.76"
+source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.76#870e30f029aee7aaaedd68b078b29e80d2aa916d"
 dependencies = [
  "winresource",
 ]
 
 [[package]]
 name = "warpui-kit-core"
-version = "0.2.49"
-source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.49#e9b73c96d435e06d44a9bf639363a55e0ce33d7a"
+version = "0.2.76"
+source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.76#870e30f029aee7aaaedd68b078b29e80d2aa916d"
 dependencies = [
  "async-channel",
  "futures-util",
@@ -7721,8 +7721,8 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-diff"
-version = "0.2.49"
-source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.49#e9b73c96d435e06d44a9bf639363a55e0ce33d7a"
+version = "0.2.76"
+source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.76#870e30f029aee7aaaedd68b078b29e80d2aa916d"
 dependencies = [
  "gpui-kit",
  "gpui-pre",
@@ -7733,8 +7733,8 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-markdown"
-version = "0.2.49"
-source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.49#e9b73c96d435e06d44a9bf639363a55e0ce33d7a"
+version = "0.2.76"
+source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.76#870e30f029aee7aaaedd68b078b29e80d2aa916d"
 dependencies = [
  "anyhow",
  "gpui-kit",
@@ -7748,8 +7748,8 @@ dependencies = [
 
 [[package]]
 name = "warpui-kit-platform"
-version = "0.2.49"
-source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.49#e9b73c96d435e06d44a9bf639363a55e0ce33d7a"
+version = "0.2.76"
+source = "git+https://github.com/enginkirmaci/warp-suite?tag=kits-v0.2.76#870e30f029aee7aaaedd68b078b29e80d2aa916d"
 dependencies = [
  "anyhow",
  "gpui-kit",
