@@ -4,7 +4,9 @@
 //! list pane: the rail picks the page and the detail pane draws it. The 250 ms
 //! tick is the runtime — it runs the countdown, drains the door, persists the
 //! snapshot and fires the phase-end notifications and chime. The ring asks for
-//! animation frames only while the countdown moves or a bloom plays.
+//! animation frames only while a phase-end bloom plays: the countdown itself
+//! steps once a second with the tick, so a running timer draws a frame a second
+//! instead of one per display refresh.
 
 use chrono::Local;
 use gpui::prelude::*;
@@ -24,7 +26,7 @@ use crate::ipc::{self, CommandKind, DoorCommand};
 use crate::settings::{Settings, WindowBox, WindowMode};
 use crate::state::{self, Writer};
 use crate::theme;
-use crate::timer::{Timer, Transition};
+use crate::timer::{Phase, Timer, Transition};
 use crate::ui::ring::RingState;
 use crate::ui::{icon, window_button, window_button_glyph};
 
@@ -33,6 +35,14 @@ use crate::ui::{icon, window_button, window_button_glyph};
 const TICK: Duration = Duration::from_millis(250);
 
 pub(crate) const SHOW_TOOLTIPS: bool = true;
+
+/// The window's minimum size, asked for when the window is created: the
+/// platform fixes it then and cannot be told a smaller one later, so it is the
+/// card's floor rather than the full window's — otherwise a window opened in
+/// full mode can never shrink into the card.
+pub fn min_window_size() -> (f32, f32) {
+    (theme::scaled(300.), theme::scaled(92.))
+}
 
 /// The mode this launch opens in: the `WARP_POMODORO_MODE=full|mini` capture
 /// hook when set, else the mode the last session left in the settings.
@@ -379,17 +389,15 @@ impl MainWindow {
     }
 
     /// The saved size for a mode, or its design size when the session has
-    /// never used it.
+    /// never used it. The card has no size of its own: it is a fixed design, so
+    /// a box remembered from a bigger window (or a compositor that tiled it)
+    /// cannot stretch the layout over empty space.
     fn mode_size(&self, mode: WindowMode) -> (f32, f32) {
-        let saved = match mode {
-            WindowMode::Full => self.settings.bounds_full,
-            WindowMode::Mini => self.settings.bounds_mini,
-        };
-        match saved {
-            Some(boxed) => (boxed.w as f32, boxed.h as f32),
-            None => match mode {
-                WindowMode::Full => (theme::scaled(theme::FULL_W), theme::scaled(theme::FULL_H)),
-                WindowMode::Mini => (theme::scaled(theme::MINI_W), theme::scaled(theme::MINI_H)),
+        match mode {
+            WindowMode::Mini => theme::card_size(),
+            WindowMode::Full => match self.settings.bounds_full {
+                Some(boxed) => (boxed.w as f32, boxed.h as f32),
+                None => (theme::scaled(theme::FULL_W), theme::scaled(theme::FULL_H)),
             },
         }
     }
@@ -413,20 +421,40 @@ impl MainWindow {
         .sane();
         match self.mode {
             WindowMode::Full => self.settings.bounds_full = boxed,
-            WindowMode::Mini => self.settings.bounds_mini = boxed.and_then(WindowBox::sane_card),
+            // Only a box that *is* the card is worth remembering: a sample
+            // taken before the mode's resize landed carries the full window's
+            // size, and on Windows that sample used to be saved as the card's
+            // box, so every later launch opened a card the size of the old
+            // window.
+            WindowMode::Mini => {
+                let (w, h) = self.mode_size(WindowMode::Mini);
+                if let Some(b) =
+                    boxed.filter(|b| (b.w as f32 - w).abs() <= 2. && (b.h as f32 - h).abs() <= 2.)
+                {
+                    // a sample that is not the card leaves the remembered card
+                    // alone rather than erasing where it sat
+                    self.settings.bounds_mini = Some(WindowBox {
+                        w: w as i32,
+                        h: h as i32,
+                        ..b
+                    })
+                    .and_then(WindowBox::sane_card);
+                }
+            }
         }
     }
 
-    /// The ring's one frame: the share of the phase left (sub-second, so the
-    /// arc keeps moving between ticks) and the bloom after a phase end.
+    /// The ring's state: the share of the phase left and the bloom after a
+    /// phase end.
+    ///
+    /// The countdown steps with the clock instead of interpolating between
+    /// ticks. A 25-minute phase turns the arc 0.24° a second — no frame budget
+    /// can draw that smoother than one step a second, and interpolating it
+    /// would repaint the whole window at the display's refresh rate for the
+    /// length of every session.
     pub(crate) fn ring_state(&self, now: Instant) -> RingState {
         let total = self.timer.phase_seconds() as f32;
-        let remaining = if self.timer.running() {
-            let between = now.saturating_duration_since(self.last_tick).as_secs_f32();
-            (self.timer.remaining_seconds() as f32 - between).max(0.)
-        } else {
-            self.timer.remaining_seconds() as f32
-        };
+        let remaining = self.timer.remaining_seconds() as f32;
         // reduced motion keeps the ring still: no phase-end bloom
         let bloom = if motion::reduced() {
             None
@@ -443,15 +471,15 @@ impl MainWindow {
         }
     }
 
-    /// Whether the window needs a new frame right now: the clock moves or the
-    /// bloom plays. A paused timer with no bloom requests nothing, and reduced
-    /// motion leaves the ring still between ticks.
-    fn animating(&self, now: Instant) -> bool {
+    /// Whether the window needs a new frame right now: only the phase-end bloom
+    /// moves faster than the tick. A running countdown is stepped by the tick
+    /// itself, so it earns no extra frames, and neither a paused timer nor a
+    /// reduced-motion ring asks for any.
+    fn blooming(&self, now: Instant) -> bool {
         !motion::reduced()
-            && (self.timer.running()
-                || self.bloom.is_some_and(|started| {
-                    now.saturating_duration_since(started) < Duration::from_millis(theme::BLOOM_MS)
-                }))
+            && self.bloom.is_some_and(|started| {
+                now.saturating_duration_since(started) < Duration::from_millis(theme::BLOOM_MS)
+            })
     }
 
     fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -462,12 +490,25 @@ impl MainWindow {
         let elapsed = now.saturating_duration_since(self.last_tick);
         self.last_tick = now;
         let mut mutations = false;
+        // a bloom that has run out draws nothing past its own length, so it is
+        // dropped here rather than repainted away
+        if self.bloom.is_some_and(|started| {
+            now.saturating_duration_since(started) >= Duration::from_millis(theme::BLOOM_MS)
+        }) {
+            self.bloom = None;
+        }
+        // what the window is showing right now: only a change in here earns a
+        // repaint, so a 250 ms tick that lands inside the same second stays
+        // free
+        let shown = self.shown_state();
 
         // the door's commands first: a Start from Warp Station applies to the
         // state the user is looking at, then its answer goes back on the wire
         while let Ok(command) = self.commands.try_recv() {
             let result = self.apply_command(command.kind, window);
-            mutations = true;
+            // a `status` poll answers and moves on; only the four verbs and the
+            // phase ends below are edges worth a write or a repaint
+            mutations |= command.kind.changes_state();
             let _ = command.reply.send(result);
         }
 
@@ -502,11 +543,27 @@ impl MainWindow {
             }
         }
 
-        let snapshot = self.timer.snapshot(&self.history.sessions, Local::now());
-        self.writer.maybe_write(&snapshot, mutations);
-        if mutations || self.timer.running() {
+        let shown_moved = self.shown_state() != shown;
+        // the state file records edges, not the ticking: a mutation is a start,
+        // a pause, a reset, a skip, a phase end or a settings change, and the
+        // second-by-second countdown writes nothing between them
+        if mutations {
+            let snapshot = self.timer.snapshot(&self.history.sessions, Local::now());
+            self.writer.maybe_write(&snapshot);
+        }
+        if mutations || shown_moved {
             cx.notify();
         }
+    }
+
+    /// The part of the timer the window draws: a repaint is needed exactly when
+    /// this changes (the countdown's second, the phase, the cycle's count).
+    fn shown_state(&self) -> (Phase, u32, u32) {
+        (
+            self.timer.phase(),
+            self.timer.remaining_seconds(),
+            self.timer.completed_in_cycle(),
+        )
     }
 
     /// Applies one door command to the live state and returns its answer
@@ -914,10 +971,10 @@ impl MainWindow {
 
 impl Render for MainWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // the ring asks for the next frame only while it moves; a paused timer
-        // with no bloom leaves the window idle, and a hidden window never
-        // animates at all
-        if self.animating(Instant::now()) && window.is_visible() {
+        // the ring asks for the next frame only while a bloom plays; the
+        // countdown is stepped by the tick, a paused timer leaves the window
+        // idle, and a hidden window never animates at all
+        if self.blooming(Instant::now()) && window.is_visible() {
             window.request_animation_frame();
         }
         let page_focus = self.page_focus.clone();
@@ -982,5 +1039,20 @@ pub(crate) fn launch_sibling(binary: &'static str) {
             });
         }
         Err(err) => tracing::warn!("could not launch {binary}: {err}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_window_minimum_lets_the_card_shrink_to_its_design() {
+        let (min_w, min_h) = min_window_size();
+        let (card_w, card_h) = theme::card_size();
+        assert!(
+            min_w <= card_w && min_h <= card_h,
+            "the platform's fixed floor ({min_w}x{min_h}) must not hold the card ({card_w}x{card_h}) open"
+        );
     }
 }

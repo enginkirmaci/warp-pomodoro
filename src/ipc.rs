@@ -51,6 +51,18 @@ pub enum CommandKind {
     Focus,
 }
 
+impl CommandKind {
+    /// Whether the command moves the timer, or only reports it. A door client
+    /// polls `status` once a second while it looks at the timer, so a poll must
+    /// not count as a change: it neither writes the snapshot nor repaints.
+    pub fn changes_state(self) -> bool {
+        matches!(
+            self,
+            CommandKind::Start | CommandKind::Pause | CommandKind::Reset | CommandKind::Skip
+        )
+    }
+}
+
 /// One command waiting for the UI tick. `ping` never gets here.
 pub struct DoorCommand {
     pub kind: CommandKind,

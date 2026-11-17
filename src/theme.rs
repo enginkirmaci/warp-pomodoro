@@ -47,6 +47,12 @@ pub const MINI_RING_THICKNESS: f32 = 5.;
 /// One mini control's square.
 pub const MINI_BUTTON: f32 = 26.;
 
+/// The mini card's one window box: the card is a design rather than a
+/// resizable panel, so its size never comes from a saved window box.
+pub fn card_size() -> (f32, f32) {
+    (scaled(MINI_W), scaled(MINI_H))
+}
+
 // ---- the full window -------------------------------------------------------
 
 /// The full window's design size, used until a session saves its own box.

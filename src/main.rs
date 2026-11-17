@@ -6,7 +6,7 @@
 )]
 
 use warp_pomodoro::settings::{Settings, WindowBox, WindowMode};
-use warp_pomodoro::ui::window::{Launch, MainWindow, launch_mode};
+use warp_pomodoro::ui::window::{Launch, MainWindow, launch_mode, min_window_size};
 use warp_pomodoro::{assets, ipc, logging, theme};
 
 use gpui::prelude::*;
@@ -74,32 +74,23 @@ fn main() {
                 WindowMode::Full => settings.bounds_full,
                 WindowMode::Mini => settings.bounds_mini,
             };
-            let (width, height) = match saved {
-                Some(boxed) => (boxed.w as f32, boxed.h as f32),
-                None => match mode {
-                    WindowMode::Full => {
-                        (theme::scaled(theme::FULL_W), theme::scaled(theme::FULL_H))
-                    }
-                    WindowMode::Mini => {
-                        (theme::scaled(theme::MINI_W), theme::scaled(theme::MINI_H))
-                    }
+            // the card is a fixed design: only the spot it sat on is restored,
+            // so a box remembered from a bigger window cannot reopen as a card
+            let (width, height) = match mode {
+                WindowMode::Mini => theme::card_size(),
+                WindowMode::Full => match saved {
+                    Some(boxed) => (boxed.w as f32, boxed.h as f32),
+                    None => (theme::scaled(theme::FULL_W), theme::scaled(theme::FULL_H)),
                 },
             };
-            let bounds = restore_bounds(saved, cx)
+            let bounds = restore_bounds(mode, saved, cx)
                 .unwrap_or_else(|| Bounds::centered(None, size(px(width), px(height)), cx));
-            // A Wayland compositor fixes the window's minimum once, when the
-            // surface is created, and enforces it on every resize; the collapse
-            // to the mini card must be able to shrink below the full window's
-            // box, so Linux asks for the card's minimum from the start. On
-            // Windows the hint is per-mode (GPUI's `SetWindowPos` resize is not
-            // clamped by it anyway).
-            #[cfg(target_os = "linux")]
-            let min_size = size(px(theme::scaled(300.)), px(theme::scaled(92.)));
-            #[cfg(not(target_os = "linux"))]
-            let min_size = match mode {
-                WindowMode::Full => size(px(theme::scaled(420.)), px(theme::scaled(480.))),
-                WindowMode::Mini => size(px(theme::scaled(300.)), px(theme::scaled(92.))),
-            };
+            // The minimum is fixed when the window is created (a Wayland
+            // compositor from the first surface, Windows from
+            // `WM_GETMINMAXINFO`) and this GPUI has no runtime setter, so it is
+            // the card's floor on every platform, whatever mode opens.
+            let (min_w, min_h) = min_window_size();
+            let min_size = size(px(min_w), px(min_h));
             let _ = gpui_kit::open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -122,12 +113,17 @@ fn main() {
 }
 
 /// The saved box for this launch, when it still meets a display: a window
-/// remember on a monitor that is gone opens centered instead of off-screen.
-fn restore_bounds(saved: Option<WindowBox>, cx: &App) -> Option<Bounds<Pixels>> {
+/// remembered on a monitor that is gone opens centered instead of off-screen.
+/// A mini launch restores only the card's spot; its size is the design's.
+fn restore_bounds(mode: WindowMode, saved: Option<WindowBox>, cx: &App) -> Option<Bounds<Pixels>> {
     let boxed = saved?;
+    let (width, height) = match mode {
+        WindowMode::Mini => theme::card_size(),
+        WindowMode::Full => (boxed.w as f32, boxed.h as f32),
+    };
     let bounds = Bounds::new(
         point(px(boxed.x as f32), px(boxed.y as f32)),
-        size(px(boxed.w as f32), px(boxed.h as f32)),
+        size(px(width), px(height)),
     );
     let on_screen = cx
         .displays()

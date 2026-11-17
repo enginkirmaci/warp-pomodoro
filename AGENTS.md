@@ -29,8 +29,13 @@ the modules and the binary is a thin bootstrap. The probes build the real
   the Settings page says so).
 - `src/history.rs` — `~/.warp/pomodoro/history.json`: completed sessions,
   newest last, capped at the last 500 completed work sessions.
-- `src/state.rs` — the `state.json` writer: at most once a second and on every
-  mutation, with one paused snapshot on a clean exit.
+- `src/state.rs` — the `state.json` writer: the file records the timer's
+  **edges** — start, pause, reset, skip, a phase end, a settings change — plus
+  one paused snapshot on a clean exit. The countdown's second-by-second
+  remainder is never written: it only moves by design, the live number is what
+  the door answers, and a `status` poll from a door client is not a change
+  (`CommandKind::changes_state`). So `updated_at` is when the state last moved,
+  not a heartbeat, and a running session costs zero writes between its edges.
 - `src/ipc.rs` — the door server (thread + `std::net` + `std::sync::mpsc` to
   the UI tick), the blocking `Client`, and `try_forward`.
 - `src/notify.rs` — the phase-end desktop notification (`notify-send` on
@@ -64,13 +69,29 @@ warp-pomodoro [--start] [--version|-V]
 - The window opens in `settings.window_mode` (the first run opens the full
   window) and remembers each mode's box; `WARP_POMODORO_MODE=full|mini`
   overrides the mode for one launch (the capture hook, read once).
+- The window is created with the **card's** minimum size on every platform,
+  not the full window's. The minimum is fixed at creation — Wayland from the
+  first surface, Windows from `WM_GETMINMAXINFO` — and this GPUI rev has no
+  runtime setter, so a full-window floor means a window opened in full mode can
+  never shrink into the card: it stays at 420×480 and the card draws in the
+  middle of a large empty box (the bug seen on Windows).
+- The card is a fixed design, not a resizable panel: its box is
+  `theme::card_size()` (the scaled `MINI_W`×`MINI_H`) both at launch and on a
+  mode switch, and only *where* it sat is restored from the settings. A box
+  sampled by the tick before a mode's resize landed is never saved as the
+  card's, so one doubled box cannot seed every later launch.
 - Switching modes saves the old box, writes the new mode, asks the platform
   for the new intent (float/pin on Linux, topmost on Windows) and resizes.
   The tick tracks `window.bounds()` every quarter second, so a drag or resize
   is never lost; the close saves the settings file.
-- The ring requests animation frames only while the countdown runs or a bloom
-  plays, and never while the window is hidden. Paused means zero frames. The
-  kit's `motion::reduced()` keeps the ring static (no bloom, no pulse).
+- The countdown does not animate at the display's rate. The ring steps once a
+  second with the tick (a 25-minute phase turns the arc 0.24° a second, so
+  interpolating it only bought a full-window repaint per refresh), and
+  `cx.notify` fires only when the shown second, the phase or the cycle moves.
+  Animation frames are requested for the phase-end bloom alone, and never
+  while the window is hidden: a paused timer draws none, and a running one
+  draws about one a second. The kit's `motion::reduced()` keeps the ring
+  static (no bloom, no pulse).
 
 ## Data and door contract
 

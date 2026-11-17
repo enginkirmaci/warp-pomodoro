@@ -23,14 +23,16 @@ use gpui::Window;
 pub const APP_ID: &str = "warp-pomodoro";
 
 /// Asks the platform to make the window exactly this size after a mode
-/// switch. Windows resizes through GPUI's `SetWindowPos` already; Wayland's
-/// `xdg_toplevel` size request is advisory, so a compositor that exposes its
-/// own IPC (Hyprland) is asked directly. Returns whether that happened.
+/// switch, without waiting for the compositor to confirm. GPUI's own resize is
+/// a task on its executor, and a card that keeps the old window's size for a
+/// frame or two is what a pinned layout cannot hide; on Windows the window is
+/// sized here directly, and Wayland's `xdg_toplevel` request is advisory, so a
+/// compositor with its own IPC (Hyprland) is asked directly. Returns whether
+/// the platform took over the resize.
 pub fn resize(window: &Window, width: f32, height: f32) -> bool {
     #[cfg(windows)]
     {
-        let _ = (window, width, height);
-        false
+        windows_resize(window, width, height)
     }
 
     #[cfg(target_os = "linux")]
@@ -66,6 +68,49 @@ pub fn apply(window: &Window, mini: bool, on_top: bool) -> bool {
     {
         let _ = (window, mini, on_top);
         false
+    }
+}
+
+#[cfg(windows)]
+fn windows_resize(window: &Window, width: f32, height: f32) -> bool {
+    use raw_window_handle::RawWindowHandle;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos,
+    };
+
+    let Ok(handle) = raw_window_handle::HasWindowHandle::window_handle(window) else {
+        return false;
+    };
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        return false;
+    };
+    let hwnd = HWND(win32.hwnd.get() as *mut core::ffi::c_void);
+    // `SetWindowPos` takes physical pixels; the app works in logical ones
+    let scale = window.scale_factor();
+    let (cx, cy) = (
+        (width * scale).round() as i32,
+        (height * scale).round() as i32,
+    );
+    // SAFETY: the HWND comes from GPUI's own window handle and stays valid for
+    // the window's lifetime; the size is the mode's own box and no message is
+    // pumped by this call.
+    match unsafe {
+        SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            cx,
+            cy,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    } {
+        Ok(()) => true,
+        Err(err) => {
+            tracing::info!("the window could not be sized for the mode: {err}");
+            false
+        }
     }
 }
 
