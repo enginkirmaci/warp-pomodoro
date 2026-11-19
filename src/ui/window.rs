@@ -28,7 +28,7 @@ use crate::state::{self, Writer};
 use crate::theme;
 use crate::timer::{Phase, Timer, Transition};
 use crate::ui::ring::RingState;
-use crate::ui::{icon, window_button, window_button_glyph};
+use crate::ui::{window_button, window_button_glyph};
 
 /// The countdown's tick: four times a second keeps a displayed second within a
 /// quarter second of the clock without a per-frame wall-clock read.
@@ -731,21 +731,11 @@ impl MainWindow {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .size(px(28.))
-                            .rounded(px(6.))
-                            .bg(theme::accent_soft())
-                            .child(icon(
-                                "icons/logo.svg",
-                                px(theme::icon_small()),
-                                theme::accent_ink(),
-                            )),
-                    )
+                    .child(about::brand_tile(
+                        about::AppId::Pomodoro,
+                        28.,
+                        theme::icon_small(),
+                    ))
                     .child(
                         div()
                             .flex_shrink_0()
@@ -767,13 +757,13 @@ impl MainWindow {
                     .gap_1()
                     // the family link lives with the window controls, so the
                     // brand cluster carries only this app's own mark
-                    .child(window_button(
+                    .child(window_button_glyph(
                         "pomodoro-launch-station",
-                        "icons/logo-station.svg",
                         theme::raised().into(),
                         "Open Warp Station",
                         SHOW_TOOLTIPS,
                         |_, _, _| launch_sibling("warp-station"),
+                        about::mark(about::AppId::Station, 16.).into_any_element(),
                     ))
                     .child(window_button(
                         "pomodoro-collapse",
