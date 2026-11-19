@@ -17,9 +17,9 @@ the modules and the binary is a thin bootstrap. The probes build the real
   cycle counter, completion and skip rules, the snapshot and the day counts.
   Display-free and I/O-free; its unit tests drive it a second at a time.
 - `src/settings.rs` — `~/.warp/pomodoro/settings.json` through the platform
-  store: versioned snake_case, strict, clamped on load. Carries the window
-  mode, each mode's saved box, the always-on-top intent and the sound switch
-  beside the timer knobs.
+  store: versioned snake_case, unknown keys preserved, clamped on load. Carries
+  the window mode, each mode's saved box, the always-on-top intent and the
+  sound switch beside the timer knobs.
 - `src/sound.rs` — the alert chime: the bundled WAV written beside the
   settings, the system player (`pw-play`/`paplay`/`aplay`, `PlaySoundW`,
   `afplay`), and the custom-file fallback. Failures log once, never block.
@@ -120,8 +120,8 @@ cargo build -p warp-pomodoro
 
 - `src/timer.rs` unit tests cover the state machine, the cycle, skip/auto-start
   rules and the day counts.
-- `tests/settings_probe.rs` — the versioned store, defaults, clamping, strict
-  schema and one-time import, under a scratch HOME.
+- `tests/settings_probe.rs` — the versioned store, defaults, clamping,
+  unknown-key preservation and one-time import, under a scratch HOME.
 - `tests/window_probe.rs` — the real window: the rail reaches History/Settings/
   About, Start flips to Pause and writes the snapshot, a step writes the
   settings file.

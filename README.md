@@ -9,8 +9,8 @@ the [warp](https://github.com/enginkirmaci/warp-suite) family. Rust/GPUI
 - Work / short break / long break on one clock: the durations, the long-break
   cycle, whether breaks and focus sessions start on their own, and the desktop
   notification switch all live in `~/.warp/pomodoro/settings.json` (versioned
-  snake_case, strict). A work session counts as complete when the clock
-  reaches zero; a skip moves on without counting it.
+  snake_case; unknown keys survive a save). A work session counts as complete
+  when the clock reaches zero; a skip moves on without counting it.
 - The window is the family shell, compact: the custom titlebar, the rail
   (Timer, History, About and Settings at the bottom) and one detail pane. The
   timer page is a **countdown ring** that drains with the phase, the large mono
@@ -22,7 +22,8 @@ the [warp](https://github.com/enginkirmaci/warp-suite) family. Rust/GPUI
   ring, the countdown, the phase and cycle, and four controls — start/pause,
   expand, pin and close. The whole card drags the window and a double click
   expands it. The app opens in the mode the last session left (the first run
-  opens the full window); each mode remembers its own size and position.
+  opens the full window); the full window remembers its size and position, and
+  the mini card — a fixed design — remembers only where it sat.
   Always-on-top is real on Windows (`SetWindowPos`); on Linux it is best
   effort through the compositor (Hyprland floats and pins the card), and the
   Settings page says so when the compositor cannot.
@@ -33,10 +34,14 @@ the [warp](https://github.com/enginkirmaci/warp-suite) family. Rust/GPUI
   beside them; nothing is recorded for a skipped work session.
 - While the app runs it publishes a token-authenticated door
   (`~/.warp/pomodoro/ipc.port` + `ipc.token`) and keeps
-  `~/.warp/pomodoro/state.json` fresh at least once a second. Warp Station's
-  Pomodoro section reads the live state through the door, falls back to
-  `state.json` when the app is closed, and drives Start/Pause/Reset. A second
-  launch forwards `focus` to the running window and exits.
+  `~/.warp/pomodoro/state.json` on every **edge** — start, pause, reset, skip,
+  a phase end, a settings change. A running session costs zero writes between
+  its edges, so `updated_at` is when the state last moved, not a heartbeat:
+  the live countdown is what the door answers, and a reader of the file
+  derives the ticking clock from `updated_at`. Warp Station's Pomodoro section
+  reads the live state through the door, falls back to `state.json` when the
+  app is closed, and drives Start/Pause/Reset. A second launch forwards
+  `focus` to the running window and exits.
 
 ## Launch contract
 
@@ -47,7 +52,7 @@ warp-pomodoro [--start] [--version|-V]
 - Bare launch opens the window, paused at the start of a work phase.
 - `--start` starts (or resumes) a work session as soon as the window opens.
   Warp Station's page uses it when the door is down.
-- `--version` / `-V` prints the family version line (`Warp Pomodoro 0.1.0
+- `--version` / `-V` prints the family version line (`Warp Pomodoro 0.2.13
   (abc1234) · dev`) and exits.
 - Unknown args are ignored so a stale desktop shortcut never blocks the
   window.
@@ -109,5 +114,6 @@ hicolor icons) and the Windows portable zip from `packaging/`.
 
 ## Sibling deps
 
-`warpui-kit-core` and `warpui-kit-platform` resolve from the pinned
-`kits-v0.1.40` tag of [warp-suite](https://github.com/enginkirmaci/warp-suite).
+`warpui-kit-core`, `warpui-kit-platform` and `warpui-kit-markdown` resolve
+from the pinned `kits-v0.2.76` tag of
+[warp-suite](https://github.com/enginkirmaci/warp-suite).

@@ -70,7 +70,7 @@ pub struct Snapshot {
 
 impl Snapshot {
     /// Whether the live state matches, ignoring the stamp the writer refreshes
-    /// at least once a second.
+    /// on every edge (a running session writes nothing between its edges).
     pub fn same_state(&self, other: &Self) -> bool {
         self.phase == other.phase
             && self.running == other.running
