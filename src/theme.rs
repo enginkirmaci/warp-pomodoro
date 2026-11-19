@@ -5,7 +5,7 @@
 // every shared font step and color const stays reachable as `theme::X`
 pub use warpui_kit_core::fonts::*;
 // the fixed semantic colors stay constants (they never follow the palette)
-pub use warpui_kit_core::palette::{AccentColors, DANGER, SCRIM, current_ramp, tint};
+pub use warpui_kit_core::palette::{AccentColors, BEHIND, DANGER, SCRIM, current_ramp, tint};
 // the module itself names `palette::…` when it maps the kit theme
 use warpui_kit_core::palette;
 pub use warpui_kit_core::shell::scaled;

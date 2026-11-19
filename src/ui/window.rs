@@ -28,7 +28,7 @@ use crate::state::{self, Writer};
 use crate::theme;
 use crate::timer::{Phase, Timer, Transition};
 use crate::ui::ring::RingState;
-use crate::ui::{window_button, window_button_glyph};
+use crate::ui::{tooltip_text, window_button, window_button_glyph};
 
 /// The countdown's tick: four times a second keeps a displayed second within a
 /// quarter second of the clock without a per-frame wall-clock read.
@@ -150,6 +150,9 @@ pub struct MainWindow {
     /// A left press landed on the titlebar background; the first move turns it
     /// into a window drag (Linux/macOS — Windows uses the HTCAPTION path).
     titlebar_should_move: bool,
+    /// The OS title the last frame set, so an unchanged activity string does
+    /// not touch the window again.
+    window_title: String,
     /// When the last phase end started its ring bloom.
     bloom: Option<Instant>,
     /// Whether the platform accepted the always-on-top intent; `None` until
@@ -222,6 +225,7 @@ impl MainWindow {
             fractional: Duration::ZERO,
             quitting: false,
             titlebar_should_move: false,
+            window_title: String::new(),
             bloom: None,
             topmost_taken: None,
             pending_topmost: mode == WindowMode::Mini,
@@ -566,6 +570,25 @@ impl MainWindow {
         )
     }
 
+    /// What the OS title and the titlebar chip say: the phase and the clock
+    /// while a pass runs, `Paused mm:ss` while time sits on a paused clock,
+    /// nothing at idle — an idle title invents no work. The chip shows the
+    /// words only while a pass runs (paused is not work, so nothing spins for
+    /// it); the OS title keeps the paused state for the glance from another
+    /// window, which is exactly when the card is not there to say it.
+    fn activity_word(&self) -> Option<String> {
+        if self.timer.running() {
+            let label = self.timer.phase().label();
+            Some(format!(
+                "{label} {}",
+                crate::ui::timer::clock_text(self.timer.remaining_seconds())
+            ))
+        } else {
+            let remaining = self.timer.remaining_seconds();
+            (remaining > 0).then(|| format!("Paused {}", crate::ui::timer::clock_text(remaining)))
+        }
+    }
+
     /// Applies one door command to the live state and returns its answer
     /// payload. `focus` only raises the window and answers `{}`.
     fn apply_command(
@@ -755,6 +778,46 @@ impl MainWindow {
                     .items_center()
                     .justify_end()
                     .gap_1()
+                    // the running pass, stated at the window level: spinner and
+                    // word while a pass runs, nothing at idle or paused — the
+                    // OS title carries paused instead, since paused is not work
+                    // for a chip to spin over. The bar is one drag region, so
+                    // the chip occludes it and stops the press like the window
+                    // buttons beside it.
+                    .when_some(
+                        self.activity_word().filter(|_| self.timer.running()),
+                        |row, label| {
+                            row.child(
+                                div()
+                                    .id("activity-chip")
+                                    .debug_selector(|| "activity-chip".into())
+                                    .role(gpui::Role::Status)
+                                    .aria_label(SharedString::from(label.clone()))
+                                    .occlude()
+                                    .flex_shrink_0()
+                                    .h(px(28.))
+                                    .px_2p5()
+                                    .rounded_full()
+                                    .bg(theme::panel())
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(7.))
+                                    .text_size(px(theme::font_meta()))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme::BEHIND)
+                                    .when(SHOW_TOOLTIPS, |chip| {
+                                        chip.tooltip(tooltip_text("The timer is running"))
+                                    })
+                                    .child(motion::spinner(
+                                        "activity-spinner",
+                                        "icons/icon-spinner.svg",
+                                        px(theme::icon_tiny()),
+                                        theme::BEHIND,
+                                    ))
+                                    .child(label),
+                            )
+                        },
+                    )
                     // the family link lives with the window controls, so the
                     // brand cluster carries only this app's own mark
                     .child(window_button_glyph(
@@ -966,6 +1029,14 @@ impl Render for MainWindow {
         // idle, and a hidden window never animates at all
         if self.blooming(Instant::now()) && window.is_visible() {
             window.request_animation_frame();
+        }
+        // the OS title states what the window is doing; it is a string, so the
+        // words are written and never animated, and it drops them at idle
+        let activity = self.activity_word();
+        let title = warpui_kit_core::activity::activity_title("Warp Pomodoro", activity.as_deref());
+        if self.window_title != title {
+            window.set_window_title(&title);
+            self.window_title = title;
         }
         let page_focus = self.page_focus.clone();
         let root = div()
