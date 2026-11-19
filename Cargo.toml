@@ -1,6 +1,6 @@
 [package]
 name = "warp-pomodoro"
-version = "0.2.16"
+version = "0.2.17"
 edition = "2024"
 description = "WarpPomodoro — a focus timer with a live Warp Station rail page"
 license = "GPL-3.0"
