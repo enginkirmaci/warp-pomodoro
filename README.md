@@ -20,7 +20,8 @@ the [warp](https://github.com/enginkirmaci/warp-suite) family. Rust/GPUI
   while it moves, and reduced motion keeps it static.
 - **The mini card** is the same timer in a small always-on-top window: the
   ring, the countdown, the phase and cycle, and four controls — start/pause,
-  expand, pin and close. The whole card drags the window and a double click
+  expand, pin and close. The whole card drags the window (a native caption
+  move on Windows, where GPUI's own move call is a no-op) and a double click
   expands it. The app opens in the mode the last session left (the first run
   opens the full window); the full window remembers its size and position, and
   the mini card — a fixed design — remembers only where it sat.
@@ -73,6 +74,7 @@ Everything lives under `~/.warp/pomodoro/`:
 | `history.json` | completed sessions, newest last |
 | `state.json` | the live snapshot Warp Station reads when the door is down |
 | `chime.wav` | the bundled alert chime, written out of the binary on first use |
+| `chime-<n>.wav` | the chime scaled to volume `n` (percent), written on first use |
 | `ipc.port` + `ipc.token` | the door, present only while the app runs |
 
 All three JSON documents are versioned snake_case with a top-level
@@ -98,10 +100,13 @@ Commands: `ping` (answered by the door thread), `status`, `start`, `pause`,
 A phase end plays a short bundled chime (`assets/audio/chime.wav`, written to
 `~/.warp/pomodoro/chime.wav` the first time). Linux hands it to the first of
 `pw-play`, `paplay`, `aplay` that exists; Windows uses `PlaySoundW`; macOS
-`afplay`. The Settings page has the switch, a custom-file field (a WAV or OGG
-outside the app folder wins over the bundled chime) and a **Test** button. A
-machine without a player gets one log line; the timer never blocks on the
-bell.
+`afplay`. The Settings page has the switch, a **volume** slider (a percentage
+of the recorded amplitude; the player arguments carry no volume, so a PCM WAV
+is scaled into `~/.warp/pomodoro/chime-<n>.wav` and that copy is played, while
+a format this build cannot rescale plays as recorded), a custom-file field (a
+WAV or OGG outside the app folder wins over the bundled chime) and a **Test**
+button. A machine without a player gets one log line; the timer never blocks
+on the bell.
 
 ## Build
 

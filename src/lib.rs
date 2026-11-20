@@ -4,6 +4,7 @@
 //! thin bootstrap over it.
 
 pub mod assets;
+pub(crate) mod drag;
 pub mod history;
 pub mod ipc;
 pub mod logging;

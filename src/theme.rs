@@ -65,6 +65,11 @@ pub const FULL_H: f32 = 720.;
 pub const STEP_BUTTON: f32 = 26.;
 /// The value between a stepper's two buttons.
 pub const STEP_VALUE_MIN_W: f32 = 88.;
+/// The Sound section's control width: the volume slider and the sound-file
+/// field line up at the page's trailing edge.
+pub const SOUND_CONTROL_W: f32 = 360.;
+/// The percentage label beside the volume slider.
+pub const VOLUME_VALUE_W: f32 = 44.;
 
 // ---- the history page -------------------------------------------------------
 

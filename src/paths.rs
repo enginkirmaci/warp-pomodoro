@@ -35,6 +35,13 @@ impl AppPaths {
     pub fn chime_file() -> PathBuf {
         Self::config_dir().join("chime.wav")
     }
+
+    /// A PCM WAV scaled to one volume, written beside the chime so every
+    /// platform hands its own player a plain file. The name carries the
+    /// percentage, so one volume's copy is never another's.
+    pub fn volume_copy_file(percent: u8) -> PathBuf {
+        Self::config_dir().join(format!("chime-{percent}.wav"))
+    }
 }
 
 #[cfg(test)]
@@ -60,6 +67,10 @@ mod tests {
         assert_eq!(
             AppPaths::chime_file(),
             AppPaths::config_dir().join("chime.wav")
+        );
+        assert_eq!(
+            AppPaths::volume_copy_file(70),
+            AppPaths::config_dir().join("chime-70.wav")
         );
     }
 }

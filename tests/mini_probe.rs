@@ -72,6 +72,19 @@ fn the_mini_card_collapses_expands_and_remembers_the_mode(cx: &mut TestAppContex
     for control in ["mini-toggle", "mini-expand", "mini-pin", "mini-close"] {
         assert!(cx.debug_bounds(control).is_some(), "{control} renders");
     }
+    // a plain click on the card's face is neither a drag nor the expand: the
+    // card arms the move on a press and starts it only once the pointer
+    // travels, so a click stays a click
+    let face = cx
+        .debug_bounds("mini-clock")
+        .expect("the clock is on the card");
+    cx.simulate_click(face.center(), Modifiers::default());
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert!(
+        cx.debug_bounds("mini-card").is_some(),
+        "a click on the face leaves the card in place"
+    );
     // the mode is persisted and the launcher reads it back
     assert_eq!(settings_value(home)["window_mode"], "mini");
     assert_eq!(

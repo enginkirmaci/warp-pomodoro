@@ -1,11 +1,15 @@
 //! The real window, headless: the rail opens History and Settings, the primary
-//! button flips Start to Pause (and writes the snapshot), and a settings step
-//! lands in the versioned settings file. One scratch HOME for the binary.
+//! button flips Start to Pause (and writes the snapshot), a settings step
+//! lands in the versioned settings file, and a click on the volume slider
+//! writes the stepped value. One scratch HOME for the binary.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use gpui::{Modifiers, Point, TestAppContext, VisualTestContext, px, size};
+use gpui::{
+    Modifiers, Point, ScrollDelta, ScrollEvent, ScrollSource, TestAppContext, TouchPhase,
+    VisualTestContext, px, size,
+};
 use warp_pomodoro::ui::window::{Launch, MainWindow};
 
 /// A scratch HOME for the whole binary: the window publishes its snapshot and
@@ -100,6 +104,41 @@ fn the_rail_opens_pages_and_start_flips_the_timer(cx: &mut TestAppContext) {
     let after = settings_value(home);
     assert_eq!(after["work_minutes"], 26);
     assert_eq!(after["schema_version"], 1);
+
+    // the volume slider sits in the Sound section, below the fold: scroll the
+    // page, then click the track. The settled default is 70 and a click lands
+    // on the nearest 5% step and writes the file.
+    assert_eq!(after["sound_volume"], 70);
+    cx.simulate_event(ScrollEvent {
+        position: Point {
+            x: px(400.),
+            y: px(400.),
+        },
+        delta: ScrollDelta::Pixels(Point {
+            x: px(0.),
+            y: px(-420.),
+        }),
+        modifiers: Modifiers::default(),
+        touch_phase: TouchPhase::Moved,
+        source: ScrollSource::Pointer,
+    });
+    cx.update(|window, cx| drop(window.draw(cx)));
+    let slider = cx
+        .debug_bounds("settings-volume-slider")
+        .expect("the volume row scrolled into view");
+    let target = Point {
+        x: slider.origin.x + slider.size.width * 0.95,
+        y: slider.origin.y + slider.size.height / 2.,
+    };
+    cx.simulate_click(target, Modifiers::default());
+    cx.run_until_parked();
+    cx.update(|window, cx| drop(window.draw(cx)));
+    assert_eq!(
+        settings_value(home)["sound_volume"],
+        95,
+        "a click on the track steps the volume and saves it"
+    );
+    assert!(cx.debug_bounds("settings-volume-value").is_some());
 
     // and About opens on Pomodoro, the app you are in
     click(cx, "rail-about");

@@ -70,6 +70,7 @@ fn the_defaults_match_the_settled_contract() {
     assert!(settings.auto_start_breaks);
     assert!(!settings.auto_start_work);
     assert!(settings.desktop_notifications);
+    assert_eq!(settings.sound_volume, 70);
 }
 
 #[test]
@@ -89,6 +90,7 @@ fn saving_writes_the_versioned_snake_case_document() {
     assert_eq!(saved["auto_start_breaks"], true);
     assert_eq!(saved["auto_start_work"], false);
     assert_eq!(saved["desktop_notifications"], true);
+    assert_eq!(saved["sound_volume"], 70);
     assert!(
         saved.get("WorkMinutes").is_none(),
         "the document is snake_case only"

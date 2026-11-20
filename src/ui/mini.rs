@@ -1,7 +1,8 @@
 //! The mini card: the same timer in a small always-on-top window. It carries
 //! the countdown, the phase and cycle, and four controls — start/pause,
 //! expand to the full window, pin (always on top) and close. The whole card
-//! drags the window and a double click expands it.
+//! drags the window (a real caption move on Windows) and a double click expands
+//! it.
 //!
 //! Nothing here owns state: it reads the window's timer and settings and calls
 //! the same verbs the full pages call, so the door, the snapshot and the
@@ -18,6 +19,11 @@ use crate::ui::A11y;
 use crate::ui::icon;
 use crate::ui::timer::clock_text;
 use crate::ui::window::{MainWindow, SHOW_TOOLTIPS};
+
+/// How far the pointer must travel after the press before the card becomes a
+/// window move: a click stays a click, and so does the second click of the
+/// double click that expands the card.
+const DRAG_START_DISTANCE: f32 = 3.;
 
 impl MainWindow {
     /// The mini card as the window's whole content.
@@ -52,12 +58,42 @@ impl MainWindow {
             .border_1()
             .border_color(theme::hairline())
             .bg(theme::panel())
-            // the card is the window: every press that reaches it drags the
-            // card (the controls stop their own presses), and a double click
-            // opens the full window
-            .on_mouse_down(MouseButton::Left, |_, window, _| {
-                window.start_window_move();
-            })
+            // the card is the window: a press that reaches the face is a move
+            // once the pointer travels (the controls stop their own presses),
+            // and a double click opens the full window. The move starts on the
+            // first real movement rather than on the press, so clicking — and
+            // the second click of a double click — never becomes a drag.
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &gpui::MouseDownEvent, _, _| {
+                    this.card_press = Some(event.position);
+                }),
+            )
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui::MouseMoveEvent, window, _| {
+                    let Some(start) = this.card_press else {
+                        return;
+                    };
+                    // a missed mouse-up (the OS move loop swallowed it) must
+                    // not turn a later hover into a drag
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        this.card_press = None;
+                        return;
+                    }
+                    let dx = f32::from(event.position.x - start.x);
+                    let dy = f32::from(event.position.y - start.y);
+                    if dx * dx + dy * dy < DRAG_START_DISTANCE * DRAG_START_DISTANCE {
+                        return;
+                    }
+                    this.card_press = None;
+                    crate::drag::start(window);
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| this.card_press = None),
+            )
+            .on_mouse_down_out(cx.listener(|this, _, _, _| this.card_press = None))
             .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                 if event.click_count() >= 2 {
                     this.set_mode(WindowMode::Full, window, cx);

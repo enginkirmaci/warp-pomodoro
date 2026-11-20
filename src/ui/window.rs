@@ -15,6 +15,7 @@ use gpui::{
     WindowControlArea, div, px,
 };
 use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::slider::{SliderEvent, SliderState};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use warpui_kit_core::about;
@@ -23,7 +24,7 @@ use warpui_kit_core::shell;
 
 use crate::history::History;
 use crate::ipc::{self, CommandKind, DoorCommand};
-use crate::settings::{Settings, WindowBox, WindowMode};
+use crate::settings::{SOUND_VOLUME_MAX, Settings, WindowBox, WindowMode};
 use crate::state::{self, Writer};
 use crate::theme;
 use crate::timer::{Phase, Timer, Transition};
@@ -134,6 +135,11 @@ pub struct MainWindow {
     shortcut_focus: FocusHandle,
     /// The alert-sound path field, shown on the Settings page.
     pub(crate) sound_path: Entity<InputState>,
+    /// The alert volume's slider, shown on the Settings page.
+    pub(crate) volume_slider: Entity<SliderState>,
+    /// The slider moved and the settings file has not caught up: the tick
+    /// writes it, so a drag is not one write per pixel.
+    volume_dirty: bool,
     /// The Test button's last failure, cleared by a successful play.
     pub(crate) sound_test: Option<String>,
     writer: Writer,
@@ -150,6 +156,10 @@ pub struct MainWindow {
     /// A left press landed on the titlebar background; the first move turns it
     /// into a window drag (Linux/macOS — Windows uses the HTCAPTION path).
     titlebar_should_move: bool,
+    /// A left press landed on the mini card's face and where it landed: the
+    /// card starts a window move once the pointer has actually travelled, so
+    /// a click and the second click of a double click stay clicks.
+    pub(crate) card_press: Option<gpui::Point<gpui::Pixels>>,
     /// The OS title the last frame set, so an unchanged activity string does
     /// not touch the window again.
     window_title: String,
@@ -180,6 +190,13 @@ impl MainWindow {
                 InputState::new(window, cx).placeholder("Empty plays the bundled chime");
             state.set_value(settings.sound_path.clone(), window, cx);
             state
+        });
+        let volume_slider = cx.new(|_| {
+            SliderState::new()
+                .min(0.)
+                .max(f32::from(SOUND_VOLUME_MAX))
+                .step(5.)
+                .default_value(f32::from(settings.sound_volume))
         });
         // E2E hook: WARP_POMODORO_PAGE=timer|history|about|settings opens that
         // rail section on launch (a hidden window takes no pointer, so a
@@ -216,6 +233,8 @@ impl MainWindow {
             shortcut_open: matches!(std::env::var("WARP_POMODORO_SHORTCUTS").as_deref(), Ok("1")),
             shortcut_focus: cx.focus_handle(),
             sound_path: sound_path.clone(),
+            volume_slider: volume_slider.clone(),
+            volume_dirty: false,
             sound_test: None,
             writer: Writer::new(),
             door,
@@ -225,6 +244,7 @@ impl MainWindow {
             fractional: Duration::ZERO,
             quitting: false,
             titlebar_should_move: false,
+            card_press: None,
             window_title: String::new(),
             bloom: None,
             topmost_taken: None,
@@ -237,6 +257,26 @@ impl MainWindow {
                 this.settings.save();
                 this.sound_test = None;
                 cx.notify();
+            }
+        })
+        .detach();
+        // the slider is the shown volume: whatever moves it — the pointer, or
+        // an assistive client stepping it — the setting and the page follow
+        cx.observe(&volume_slider, |this, slider, cx| {
+            let value = slider.read(cx).value().end().round() as u8;
+            if value != this.settings.sound_volume {
+                this.settings.set_sound_volume(value);
+                this.volume_dirty = true;
+                cx.notify();
+            }
+        })
+        .detach();
+        // a drag writes the file when it ends; the tick is the fallback for a
+        // value an assistive client stepped, which has no release event
+        cx.subscribe(&volume_slider, |this, _, event: &SliderEvent, _| {
+            if matches!(event, SliderEvent::Release(_)) && this.volume_dirty {
+                this.volume_dirty = false;
+                this.settings.save();
             }
         })
         .detach();
@@ -533,6 +573,12 @@ impl MainWindow {
 
         // a drag or resize is remembered continuously; the close saves the file
         self.track_bounds(window);
+        // the volume is written when the tick catches up rather than on every
+        // pointer step, and the same path persists an assistive client's step
+        if self.volume_dirty {
+            self.volume_dirty = false;
+            self.settings.save();
+        }
         // the startup intent waits for the window to be mapped, so the
         // compositor lists it when the card asks to float and stay on top
         if self.pending_topmost && window.is_visible() {

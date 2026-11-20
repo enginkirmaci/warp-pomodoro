@@ -1,11 +1,13 @@
 //! The Settings page: the durations, the long-break cycle, the two auto-start
-//! switches, the notification switch, the reduce-motion switch, and the
-//! family's text-size and palette controls. Everything applies at once — the
-//! design has no Save — and lands in `~/.warp/pomodoro/settings.json`.
+//! switches, the notification switch, the alert sound's switch, volume and
+//! file, the reduce-motion switch, and the family's text-size and palette
+//! controls. Everything applies at once — the design has no Save — and lands
+//! in `~/.warp/pomodoro/settings.json`.
 
 use gpui::Focusable as _;
 use gpui::prelude::*;
 use gpui::{AnyElement, App, ClickEvent, Context, SharedString, Window, div, px};
+use gpui_kit::component::slider::Slider;
 use warpui_kit_core::settings as kit;
 use warpui_kit_core::shell;
 
@@ -125,6 +127,13 @@ impl MainWindow {
             }),
         ));
         rows.push(kit::row_with_desc(
+            "settings-row-Volume",
+            "Volume",
+            "How loud the phase-end chime plays; non-WAV files keep their level",
+            self.volume_controls(),
+            false,
+        ));
+        rows.push(kit::row_with_desc(
             "settings-row-Sound file",
             "Sound file",
             "A WAV or OGG to play instead; empty plays the bundled chime",
@@ -220,6 +229,43 @@ impl MainWindow {
             .into_any_element()
     }
 
+    /// The alert volume: the slider and the percentage it is at, in the same
+    /// width as the sound-file field below it.
+    fn volume_controls(&self) -> AnyElement {
+        let volume = self.settings.sound_volume;
+        div()
+            .debug_selector(|| "settings-sound-volume".into())
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .w(px(theme::scaled(theme::SOUND_CONTROL_W)))
+            .child(
+                div()
+                    .debug_selector(|| "settings-volume-slider".into())
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        Slider::new(&self.volume_slider)
+                            .horizontal()
+                            .accessibility_label("Alert volume")
+                            .bg(theme::accent())
+                            .text_color(theme::on_accent()),
+                    ),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "settings-volume-value".into())
+                    .flex_shrink_0()
+                    .w(px(theme::scaled(theme::VOLUME_VALUE_W)))
+                    .text_right()
+                    .text_size(px(theme::font_control()))
+                    .text_color(theme::text())
+                    .child(SharedString::from(format!("{volume}%"))),
+            )
+            .into_any_element()
+    }
+
     /// The sound file's field and its Test button, side by side.
     fn sound_path_controls(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let field = warpui_kit_core::field::boxed(
@@ -246,7 +292,7 @@ impl MainWindow {
             .flex_row()
             .items_center()
             .gap_2()
-            .w(px(theme::scaled(360.)))
+            .w(px(theme::scaled(theme::SOUND_CONTROL_W)))
             .child(field)
             .child(
                 div()

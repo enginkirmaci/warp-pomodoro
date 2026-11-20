@@ -19,10 +19,16 @@ the modules and the binary is a thin bootstrap. The probes build the real
 - `src/settings.rs` — `~/.warp/pomodoro/settings.json` through the platform
   store: versioned snake_case, unknown keys preserved, clamped on load. Carries
   the window mode, each mode's saved box, the always-on-top intent and the
-  sound switch beside the timer knobs.
+  sound switch and volume beside the timer knobs.
 - `src/sound.rs` — the alert chime: the bundled WAV written beside the
   settings, the system player (`pw-play`/`paplay`/`aplay`, `PlaySoundW`,
-  `afplay`), and the custom-file fallback. Failures log once, never block.
+  `afplay`), the custom-file fallback, and the volume: a PCM WAV is scaled to
+  `settings.sound_volume` percent into `chime-<n>.wav` before it is handed to
+  the player (no player argument carries a volume; `PlaySoundW` has none).
+  Failures log once, never block.
+- `src/drag.rs` — the mini card's move: `start_window_move` on Linux/macOS,
+  and on Windows the caption `WM_NCLBUTTONDOWN` the platform hook does not
+  send. See "Window modes and motion".
 - `src/topmost.rs` — the always-on-top intent per platform: `SetWindowPos` on
   Windows, Hyprland's own IPC on Linux (float the card by its address, pin it
   when the setting is on), unsupported elsewhere (the setting is stored and
@@ -84,6 +90,12 @@ warp-pomodoro [--start] [--version|-V]
   for the new intent (float/pin on Linux, topmost on Windows) and resizes.
   The tick tracks `window.bounds()` every quarter second, so a drag or resize
   is never lost; the close saves the settings file.
+- The card's face is a drag surface: a press arms it and the first movement
+  beyond 3 px starts the window move, so a click (and the second click of the
+  double click that expands) stays a click. On Linux/macOS that is GPUI's
+  `start_window_move`; on Windows that call is a no-op, so `src/drag.rs` sends
+  the caption move itself. The card is not a `WindowControlArea::Drag`: that
+  would hand a double click to the OS maximize instead of the expand.
 - The countdown does not animate at the display's rate. The ring steps once a
   second with the tick (a 25-minute phase turns the arc 0.24° a second, so
   interpolating it only bought a full-window repaint per refresh), and

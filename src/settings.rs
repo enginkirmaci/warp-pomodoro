@@ -24,6 +24,11 @@ pub const MINUTES_MAX: u32 = 24 * 60;
 pub const LONG_BREAK_EVERY_MIN: u32 = 1;
 pub const LONG_BREAK_EVERY_MAX: u32 = 12;
 
+/// The alert chime's volume: the percentage of the recorded amplitude it plays
+/// at, and the default that leaves the bell some headroom.
+pub const SOUND_VOLUME_DEFAULT: u8 = 70;
+pub const SOUND_VOLUME_MAX: u8 = 100;
+
 /// The window the app opens in: the full dashboard or the compact card.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -90,6 +95,9 @@ pub struct Settings {
     pub desktop_notifications: bool,
     /// The short chime at a phase end.
     pub sound_enabled: bool,
+    /// The chime's volume as a percentage of the recorded amplitude; 0 is
+    /// silent, 100 plays the file as it was recorded.
+    pub sound_volume: u8,
     /// A custom WAV/OGG the sound plays instead of the bundled chime; empty
     /// means the bundled one.
     pub sound_path: String,
@@ -117,6 +125,7 @@ impl Default for Settings {
             auto_start_work: false,
             desktop_notifications: true,
             sound_enabled: true,
+            sound_volume: SOUND_VOLUME_DEFAULT,
             sound_path: String::new(),
             reduce_motion: false,
             window_mode: WindowMode::Full,
@@ -172,6 +181,7 @@ impl Settings {
         self.long_break_every = self
             .long_break_every
             .clamp(LONG_BREAK_EVERY_MIN, LONG_BREAK_EVERY_MAX);
+        self.sound_volume = self.sound_volume.min(SOUND_VOLUME_MAX);
         self.sound_path = self.sound_path.trim().to_string();
         self.bounds_full = self.bounds_full.and_then(WindowBox::sane);
         self.bounds_mini = self.bounds_mini.and_then(WindowBox::sane_card);
@@ -192,6 +202,10 @@ impl Settings {
 
     pub fn set_long_break_every(&mut self, value: u32) {
         self.long_break_every = value.clamp(LONG_BREAK_EVERY_MIN, LONG_BREAK_EVERY_MAX);
+    }
+
+    pub fn set_sound_volume(&mut self, value: u8) {
+        self.sound_volume = value.min(SOUND_VOLUME_MAX);
     }
 
     pub fn work_seconds(&self) -> u32 {
@@ -225,6 +239,7 @@ mod tests {
         assert!(settings.auto_start_breaks);
         assert!(!settings.auto_start_work);
         assert!(settings.desktop_notifications);
+        assert_eq!(settings.sound_volume, SOUND_VOLUME_DEFAULT);
         assert_eq!(settings.work_seconds(), 1500);
     }
 
@@ -244,10 +259,12 @@ mod tests {
 
         let wide = Settings {
             long_break_every: 99,
+            sound_volume: 200,
             ..Settings::default()
         }
         .normalized();
         assert_eq!(wide.long_break_every, LONG_BREAK_EVERY_MAX);
+        assert_eq!(wide.sound_volume, SOUND_VOLUME_MAX);
     }
 
     #[test]
@@ -285,14 +302,17 @@ mod tests {
         let mut settings = Settings::default();
         settings.set_work_minutes(0);
         settings.set_long_break_every(40);
+        settings.set_sound_volume(200);
         assert_eq!(settings.work_minutes, MINUTES_MIN);
         assert_eq!(settings.long_break_every, LONG_BREAK_EVERY_MAX);
+        assert_eq!(settings.sound_volume, SOUND_VOLUME_MAX);
     }
 
     #[test]
     fn the_window_and_sound_defaults_are_settled() {
         let settings = Settings::default();
         assert!(settings.sound_enabled);
+        assert_eq!(settings.sound_volume, SOUND_VOLUME_DEFAULT);
         assert!(settings.sound_path.is_empty());
         assert_eq!(settings.window_mode, WindowMode::Full);
         assert!(settings.always_on_top);
@@ -314,6 +334,10 @@ mod tests {
         let settings: Settings = serde_json::from_str(text).unwrap();
         assert_eq!(settings.work_minutes, 30);
         assert!(settings.sound_enabled, "the new keys take their defaults");
+        assert_eq!(
+            settings.sound_volume, SOUND_VOLUME_DEFAULT,
+            "a file without the volume key takes the default"
+        );
         assert!(!settings.reduce_motion, "the motion switch defaults off");
         assert_eq!(settings.window_mode, WindowMode::Full);
         assert!(settings.always_on_top);
